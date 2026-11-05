@@ -184,7 +184,8 @@ if _trusted_origins:
     CSRF_TRUSTED_ORIGINS = [o.strip() for o in _trusted_origins.split(",") if o.strip()]
 
 # ── HTTPS mode (set HTTPS_ENABLED=true in .env when behind a TLS proxy) ───────
-if os.environ.get("HTTPS_ENABLED", "False").lower() == "true":
+HTTPS_ENABLED = os.environ.get("HTTPS_ENABLED", "False").lower() == "true"
+if HTTPS_ENABLED:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True

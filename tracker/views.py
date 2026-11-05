@@ -238,7 +238,13 @@ def _webauthn_rp_id(request):
 
 
 def _webauthn_origin(request):
-    scheme = "https" if request.is_secure() else "http"
+    # Deliberately not request.is_secure(): some reverse-proxy setups forward
+    # X-Forwarded-Proto inconsistently (e.g. a double hop producing "https,
+    # http" rather than a clean "https"), which makes is_secure() return
+    # False even though every real client reaches the site over HTTPS.
+    # HTTPS_ENABLED already tells us that's the deployment's only mode, so
+    # trust it over the per-request header for this specific check.
+    scheme = "https" if (settings.HTTPS_ENABLED or request.is_secure()) else "http"
     return "{}://{}".format(scheme, request.get_host())
 
 
