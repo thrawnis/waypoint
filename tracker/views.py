@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import re
 import urllib.request
@@ -27,6 +28,7 @@ from .forms import (
     CollectionEditForm, CollectionForm, ItemForm, ItemReviewForm, LocationForm,
     LocationReviewForm, PhotoForm, RegisterForm, TakeoutImportForm,
 )
+
 from .models import (
     AuditLog, ChainGroup, Collection, Connection, ConnectToken, EmailVerification,
     FriendGroup, FriendGroupJoinRequest,
@@ -36,6 +38,8 @@ from .models import (
 )
 from .permissions import SUPERUSER_GROUP_NAME, can_edit_location, is_admin, is_superuser_role, user_has_mfa
 from .ratelimit import get_client_ip, ratelimit
+
+logger = logging.getLogger(__name__)
 
 
 # ── Roles ─────────────────────────────────────────────────────────────────────
@@ -342,6 +346,7 @@ def passkey_auth_verify(request):
             credential_current_sign_count=cred.sign_count,
         )
     except Exception:
+        logger.exception("Passkey authentication verification failed for user %s", user.pk)
         _twofa_record_failure(uid)
         return JsonResponse({"error": "That passkey didn't verify. Try again."}, status=400)
 
@@ -483,6 +488,10 @@ def passkey_register_verify(request):
             expected_origin=_webauthn_origin(request),
         )
     except Exception:
+        logger.exception(
+            "Passkey registration verification failed for user %s (rp_id=%r origin=%r)",
+            user.pk, _webauthn_rp_id(request), _webauthn_origin(request),
+        )
         return JsonResponse({"error": "That passkey couldn't be registered. Try again."}, status=400)
 
     WebAuthnCredential.objects.create(
