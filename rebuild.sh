@@ -35,17 +35,27 @@ echo "==> Pulling latest code..."
 git -C "$REPO" pull origin "$BRANCH"
 
 AFTER=$(git -C "$REPO" rev-parse HEAD)
+COMMIT=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-if [ "$BEFORE" = "$AFTER" ] && [ "$FORCE" -eq 0 ] && [ "$PULL_BASE_IMAGES" -eq 0 ]; then
-  echo "==> No new commits on $BRANCH — nothing to rebuild. (use --force to rebuild anyway)"
+# Compare against what's actually running, not just whether the pull brought
+# in new commits — catches a container left stale by a failed/skipped build,
+# a manual restart, or any other way the two drifted apart.
+RUNNING_COMMIT=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$IMAGE" 2>/dev/null \
+  | sed -n 's/^GIT_COMMIT=//p')
+
+if [ "$BEFORE" = "$AFTER" ] && [ "$RUNNING_COMMIT" = "$COMMIT" ] \
+   && [ "$FORCE" -eq 0 ] && [ "$PULL_BASE_IMAGES" -eq 0 ]; then
+  echo "==> Already up to date (commit $COMMIT, no new commits on $BRANCH) — nothing to rebuild."
+  echo "    (use --force to rebuild anyway)"
   exit 0
+fi
+if [ "$BEFORE" = "$AFTER" ] && [ "$RUNNING_COMMIT" != "$COMMIT" ]; then
+  echo "==> No new commits, but the running image is at '$RUNNING_COMMIT' not '$COMMIT' — rebuilding anyway."
 fi
 
 # Ensure host-side data subdirs exist before Docker mounts them
 echo "==> Creating data directories..."
 mkdir -p "$REPO/data/media" "$REPO/data/staticfiles" "$REPO/data/postgres"
-
-COMMIT=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 # Build the image directly with buildx so BuildKit is guaranteed. Compose's
 # buildx detection is unreliable on this server and can silently fall back to the
