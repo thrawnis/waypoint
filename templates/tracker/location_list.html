@@ -374,6 +374,7 @@
        searches immediately. Only as many as fit on one line are shown. -->
   <div id="quick-search-chips" class="mt-2">
     <button type="button" class="qs-chip" data-q="restaurant">🍽️ Restaurants</button>
+    <button type="button" class="qs-chip" data-q="public transit">🚆 Transit</button>
     <button type="button" class="qs-chip" data-q="retail store">🛍️ Retail</button>
     <button type="button" class="qs-chip" data-q="lodging">🏨 Lodging</button>
     <button type="button" class="qs-chip" data-q="coffee">☕ Coffee</button>
@@ -381,6 +382,8 @@
     <button type="button" class="qs-chip" data-q="grocery store">🛒 Groceries</button>
     <button type="button" class="qs-chip" data-q="gas station">⛽ Gas</button>
     <button type="button" class="qs-chip" data-q="park">🌳 Parks</button>
+    <button type="button" class="qs-chip" data-q="airport">✈️ Airports</button>
+    <button type="button" class="qs-chip" data-q="transportation">🚉 Transportation</button>
   </div>
 
   {{ waypoints|json_script:"wp-data" }}
@@ -405,9 +408,11 @@
       <div id="nearby-list" class="space-y-1.5"></div>
     </div>
 
-    <!-- Saved-waypoint list — hidden while a nearby search is showing above it
-         (see syncSavedListVisibility), so the two lists never stack. -->
-    <div id="saved-list-section">
+    <!-- Saved-waypoint list — hidden by default (and while a nearby search is
+         showing above it, see syncSavedListVisibility) so the two lists never
+         stack, and the opening view never flashes it before the opening
+         nearby search takes over (see showOpeningSearchLoading/?panel=mine). -->
+    <div id="saved-list-section" class="hidden">
       <!-- Sort / paging controls -->
       <div class="flex flex-wrap items-center gap-2 mb-3">
         <span id="wp-list-count" class="text-sm font-semibold text-slate-600 mr-auto">Loading…</span>
@@ -648,11 +653,10 @@ const CSRF_TOKEN = '{{ csrf_token }}';
   let savedIndexCbs  = [];
   let searchCenter   = null;   // {lat,lng} centre for the text search + distances
   let lastNearbyQuery = '';
+  let lastNearbyResults = null;   // {query, center, results, status} — so a filter change can re-render without a new Places call
   // Opening the app lands on what's around you rather than your own saved
-  // list: once a position is known, run this search automatically. The
-  // nearby-search term itself isn't persisted between sessions (only the
-  // location is), so this is what actually runs on every reopen with a
-  // known location — it just doesn't fire if the user starts typing first.
+  // list: once a position is known, run this search automatically. Only ever
+  // on a fresh open — a restored search (see loadQuery) always wins.
   const DEFAULT_NEARBY_QUERY = 'restaurant';
   let defaultSearchDone = false;
 
@@ -703,6 +707,11 @@ const CSRF_TOKEN = '{{ csrf_token }}';
   })();
   WAYPOINTS.forEach(w => { w._name = (w.name || '').toLowerCase();
                            w._loc  = [w.city, w.state, w.address].filter(Boolean).join(' ').toLowerCase(); });
+  // Looked up by Google Place ID so a nearby-search result that's already a
+  // tracked waypoint can be filtered (GF/mine/Waypoint rating) the same way
+  // the saved list is — those fields aren't part of a live Places result.
+  const WAYPOINTS_BY_PLACE_ID = {};
+  WAYPOINTS.forEach(w => { if (w.google_place_id) WAYPOINTS_BY_PLACE_ID[w.google_place_id] = w; });
 
   const MAX_RADIUS_M = 16093;   // 10 miles — the widest area the user may view/search
 
@@ -1279,13 +1288,12 @@ const CSRF_TOKEN = '{{ csrf_token }}';
 
   // ── Persisted session state (localStorage, so it survives closing/reopening
   // the app after it's been idle — you continue where you left off instead of
-  // re-locating). Only the location box label + search/distance centre
-  // persist — deliberately NOT the nearby-search term (POI name field):
-  // that's a one-off "what am I looking for right now" query, not something
-  // that should reappear unasked next time the app opens.
+  // re-locating). We keep the location box label, the search/distance centre
+  // coordinates, and the last nearby-search term. ──
   const LOC_KEY    = 'wp_last_location';   // location box label text
   const SRC_KEY    = 'wp_last_location_src'; // 'user' (typed a place) | 'auto' (from a locate)
   const CENTER_KEY = 'wp_last_center';     // {lat,lng} JSON — nearby-search + distance centre
+  const QUERY_KEY  = 'wp_last_query';      // last nearby-search term
 
   // Where the text in the location box came from matters. A typed place
   // ("Oceanside, CA") is a fixed spot worth restoring verbatim. An automatic
@@ -1305,6 +1313,8 @@ const CSRF_TOKEN = '{{ csrf_token }}';
   }
   function saveCenter(c)     { try { if (c) localStorage.setItem(CENTER_KEY, JSON.stringify(c)); } catch(_){} }
   function loadCenter()      { try { const r = localStorage.getItem(CENTER_KEY); return r ? JSON.parse(r) : null; } catch(_){ return null; } }
+  function saveQuery(q)      { try { if (q) localStorage.setItem(QUERY_KEY, q); else localStorage.removeItem(QUERY_KEY); } catch(_){} }
+  function loadQuery()       { try { return localStorage.getItem(QUERY_KEY) || ''; } catch(_){ return ''; } }
 
   // Set the search/distance centre and persist it so a reopen doesn't re-locate.
   function setSearchCenter(c) { searchCenter = c; saveCenter(c); }
@@ -1430,6 +1440,7 @@ const CSRF_TOKEN = '{{ csrf_token }}';
     } else {
       showGeoError('Could not determine location automatically');
     }
+    if (data.status !== 'ok') giveUpOnOpeningSearch();
     // ipFallback only ever runs because a precise GPS fix wasn't available.
     if (explicit) openPreciseHelp();
   }
@@ -1662,6 +1673,12 @@ const CSRF_TOKEN = '{{ csrf_token }}';
     renderList();
     updateFilterBadge();
     if (mainMap) applyFilters();
+    // Re-filter the currently showing nearby search in place — no new Places
+    // API call, since the raw results are already in hand.
+    if (lastNearbyResults) {
+      const r = lastNearbyResults;
+      renderTextResults(r.query, r.center, r.results, r.status);
+    }
   }
 
   // ── "Location required" gate ────────────────────────────────────
@@ -1795,6 +1812,7 @@ const CSRF_TOKEN = '{{ csrf_token }}';
     if (!query) { clearTextResults(); return; }
     if (!searchCenter && !userPos && !hasLocationText()) { flashLocationRequired(); return; }
     lastNearbyQuery = query;
+    saveQuery(query);              // remember so a reopen restores this search
     const token = ++searchToken;
     osmSpinner(true);
     ensurePlacesLib(() => {
@@ -1811,6 +1829,7 @@ const CSRF_TOKEN = '{{ csrf_token }}';
           }, (results, status) => {
             osmSpinner(false);
             if (token !== searchToken) return;   // a newer search already replaced this one
+            lastNearbyResults = { query, center, results, status };
             renderTextResults(query, center, results, status);
           });
         });
@@ -1835,6 +1854,34 @@ const CSRF_TOKEN = '{{ csrf_token }}';
     runTextSearch(DEFAULT_NEARBY_QUERY);
   }
 
+  // Shown the instant the page opens (before a position is even known) so the
+  // opening view never flashes the full saved-waypoint list before flipping
+  // over to nearby results once the opening search (restored or default)
+  // resolves. query is whatever's about to run: a restored search if one was
+  // saved (see loadQuery), otherwise the default "restaurant" search.
+  function showOpeningSearchLoading(query) {
+    const wrap = document.getElementById('nearby-results');
+    const list = document.getElementById('nearby-list');
+    if (!wrap || !list) return;
+    wrap.classList.remove('hidden');
+    const qEl = document.getElementById('nearby-query');
+    const cEl = document.getElementById('nearby-count');
+    if (qEl) qEl.textContent = `"${query}"`;
+    if (cEl) cEl.textContent = '';
+    list.innerHTML = '<p class="text-sm text-slate-400 py-4">🔎 Finding what’s nearby…</p>';
+    document.getElementById('saved-list-section')?.classList.add('hidden');
+  }
+
+  // Locating the user can fail outright (denied permission, no network, a
+  // rate-limited IP lookup) — with nothing to search around, fall back to the
+  // saved-waypoint list instead of leaving the loading placeholder up forever.
+  function giveUpOnOpeningSearch() {
+    if (defaultSearchDone || lastNearbyQuery) return;   // a real search already started/finished
+    defaultSearchDone = true;
+    document.getElementById('nearby-results')?.classList.add('hidden');
+    document.getElementById('saved-list-section')?.classList.remove('hidden');
+  }
+
   // The saved-waypoint list is redundant clutter directly under an active
   // nearby search — hide it while results are showing, restore it once
   // they're cleared, so the two lists never stack on top of each other.
@@ -1848,10 +1895,29 @@ const CSRF_TOKEN = '{{ csrf_token }}';
 
   function clearTextResults() {
     lastNearbyQuery = '';
+    lastNearbyResults = null;
+    saveQuery('');                 // forget the remembered search
     document.getElementById('nearby-results')?.classList.add('hidden');
     const list = document.getElementById('nearby-list');
     if (list) list.innerHTML = '';
     syncSavedListVisibility();
+  }
+
+  // Same filters as the saved list (GF/mine/Waypoint rating come from the
+  // tracked-waypoint record, if any; Google rating comes straight off the
+  // live Places result) — a nearby result with no tracked waypoint can never
+  // satisfy a GF/mine/Waypoint-rating filter, since that data doesn't exist
+  // for it.
+  function nearbyResultFilterOk(place) {
+    const w = place.place_id ? WAYPOINTS_BY_PLACE_ID[place.place_id] : null;
+    const gfOk = !gfFilter
+               || (!!w && gfFilter === 'dedicated' && w.gluten_free === 'dedicated')
+               || (!!w && gfFilter === 'gf-any'    && (w.gluten_free === 'dedicated' || w.gluten_free === 'options'));
+    const mineOk = !mineFilter || !!(w && w.mine);
+    const ratingOk = !ratingFilter || !!(w && w.rating != null && w.rating >= ratingFilter);
+    const gRating = place.rating;
+    const googleRatingOk = !googleRatingFilter || (gRating != null && gRating >= googleRatingFilter);
+    return gfOk && mineOk && ratingOk && googleRatingOk;
   }
 
   function renderTextResults(query, center, results, status) {
@@ -1874,11 +1940,19 @@ const CSRF_TOKEN = '{{ csrf_token }}';
       list.innerHTML = `<p class="text-sm text-slate-400 py-4">Search failed — please try again.</p>`;
       return;
     }
-    const sorted = results.map(place => {
+    const allSorted = results.map(place => {
       const plat = place.geometry.location.lat(), plng = place.geometry.location.lng();
       return { place, lat: plat, lng: plng, distKm: haversineKm(center.lat, center.lng, plat, plng) };
     }).sort((a, b) => a.distKm - b.distKm);
-    if (cEl) cEl.textContent = `(${sorted.length})`;
+    const sorted = allSorted.filter(({ place }) => nearbyResultFilterOk(place));
+    if (cEl) {
+      cEl.textContent = sorted.length === allSorted.length
+        ? `(${sorted.length})` : `(${sorted.length} of ${allSorted.length})`;
+    }
+    if (!sorted.length) {
+      list.innerHTML = `<p class="text-sm text-slate-500 py-4">😕 No results match your filters. Try loosening them.</p>`;
+      return;
+    }
     list.innerHTML = sorted.map(({ place, lat, lng, distKm }) => {
       const name    = place.name || '';
       const types   = place.types || [];
@@ -1892,17 +1966,18 @@ const CSRF_TOKEN = '{{ csrf_token }}';
       const saved   = placeId ? savedByPlaceId[placeId] : null;
       const rateParams = { name, latitude: lat.toFixed(6), longitude: lng.toFixed(6),
                            address: addr || '', google_place_id: placeId || '' };
-      // Already a tracked waypoint → the whole card opens its detail page
-      // (see the delegated click/keydown handler below, not a plain <a>: this
-      // card also contains the "Rate Me!" form, and an <a> wrapping a <form>
-      // would race the form's own submit navigation).
+      // The whole card opens a detail page — an already-tracked waypoint's own
+      // page directly, or (not yet tracked) the same get-or-create-then-open
+      // flow as "Rate Me!" (see the delegated click/keydown handler below,
+      // not a plain <a>: this card also contains the "Rate Me!" form, and an
+      // <a> wrapping a <form> would race the form's own submit navigation).
       const detailUrl = saved && saved.url ? saved.url : '';
-      const cardAttrs = detailUrl
-        ? `data-href="${escapeHtml(detailUrl)}" role="link" tabindex="0"`
-        : '';
+      const clickable = detailUrl || IS_AUTH;
+      const cardAttrs = clickable ? `role="link" tabindex="0"` : '';
+      const hrefAttr = detailUrl ? ` data-href="${escapeHtml(detailUrl)}"` : '';
       const cardClass = 'flex items-start gap-2.5 bg-white border border-slate-200 rounded-lg p-3'
-        + (detailUrl ? ' cursor-pointer hover:border-brand/40 hover:shadow-sm transition-shadow' : '');
-      return `<div class="${cardClass}" ${cardAttrs}>
+        + (clickable ? ' cursor-pointer hover:border-brand/40 hover:shadow-sm transition-shadow' : '');
+      return `<div class="${cardClass}" ${cardAttrs}${hrefAttr}>
         <div class="w-2.5 h-2.5 rounded-full shrink-0 mt-1.5" style="background:${info.color}"></div>
         <div class="min-w-0 flex-1">
           <div class="flex items-start justify-between gap-2">
@@ -2002,23 +2077,29 @@ const CSRF_TOKEN = '{{ csrf_token }}';
       if (ni) { ni.value = ''; nameFilter = ''; listPage = 1; renderList(); }
     });
 
-    // Tapping anywhere on an already-tracked result opens its detail page —
-    // not just the "Rate Me!" pill. Delegated (cards are rebuilt on every
-    // search) and deliberately NOT a plain <a> wrapping the card, since the
-    // card also contains the Rate Me <form> and a wrapping <a>'s own
-    // navigation would race that form's submit.
+    // Tapping anywhere on a result opens its detail page — not just the
+    // "Rate Me!" pill: an already-tracked waypoint goes straight there, and an
+    // untracked one goes through the same get-or-create flow "Rate Me!" uses
+    // (its own form, submitted programmatically). Delegated (cards are
+    // rebuilt on every search) and deliberately NOT a plain <a> wrapping the
+    // card, since a wrapping <a>'s own navigation would race the form's submit.
     const nearbyList = document.getElementById('nearby-list');
+    const openNearbyCard = card => {
+      if (card.dataset.href) { window.location.href = card.dataset.href; return; }
+      card.querySelector('form')?.requestSubmit();
+    };
     nearbyList?.addEventListener('click', e => {
       if (e.target.closest('form, button, a')) return;   // let Rate Me! work normally
-      const card = e.target.closest('[data-href]');
-      if (card) window.location.href = card.dataset.href;
+      const card = e.target.closest('[role="link"]');
+      if (card) openNearbyCard(card);
     });
     nearbyList?.addEventListener('keydown', e => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
-      const card = e.target.closest('[data-href]');
+      if (e.target.closest('form, button, a')) return;   // let Rate Me! work normally
+      const card = e.target.closest('[role="link"]');
       if (!card) return;
       e.preventDefault();
-      window.location.href = card.dataset.href;
+      openNearbyCard(card);
     });
 
     fitQuickChips();
@@ -2094,21 +2175,34 @@ const CSRF_TOKEN = '{{ csrf_token }}';
     setSortDirIcon();
     renderList();
 
-    // The home view now opens on what's nearby rather than the user's own
-    // list, so the "My Waypoints" dropdown link (?panel=mine) has to switch
-    // that filter on explicitly. ?view=map opens straight into the map view.
+    // ?view=map opens straight into the map view; ?panel=mine (the "My
+    // Waypoints" dropdown link) turns the mine-only filter on explicitly.
     const params = new URLSearchParams(window.location.search);
     if (!MAP_DISABLED && params.get('view') === 'map') showView('map');
     const wantsMine = params.get('panel') === 'mine';
+    // A search you were running last session (see saveQuery in runTextSearch)
+    // takes over completely on reopen — the "restaurant" default only ever
+    // applies to a fresh session that never searched for anything else.
+    const savedQuery = loadQuery();
     if (wantsMine) {
       mineFilter = true;
       const mineEl = document.getElementById('mine-filter');
       if (mineEl) mineEl.checked = true;
       updateFilterBadge();
       renderList();
-      // They asked for their own list — don't let the opening nearby search
-      // run, since its name filter would hide the very waypoints they came for.
+      // They asked for their own list — show it immediately (it's hidden by
+      // default so the opening view never flashes it before a nearby search
+      // takes over) and don't let that opening search run at all.
       defaultSearchDone = true;
+      document.getElementById('saved-list-section')?.classList.remove('hidden');
+    } else {
+      // Default open: show the "finding what's nearby" placeholder right away
+      // instead of the saved list, so there's nothing to flip away from once
+      // the opening search (restored or default) actually starts.
+      showOpeningSearchLoading(savedQuery || DEFAULT_NEARBY_QUERY);
+      // Safety net — if locating fails in a way ipFallback doesn't catch
+      // (e.g. it never resolves at all), don't leave the placeholder up forever.
+      setTimeout(giveUpOnOpeningSearch, 20000);
     }
 
     // Continue where you left off. These persist across app restarts
@@ -2135,11 +2229,21 @@ const CSRF_TOKEN = '{{ csrf_token }}';
       renderList();
     }
 
-    // The nearby-search term (POI name field) is deliberately NOT persisted —
-    // only the location. If a location is already known, open on what's
-    // nearby right away; when we still have to locate, onLocated fires this
-    // instead as soon as the fix lands.
-    if (savedCenter) maybeRunDefaultSearch();
+    // Restore the last nearby search and re-run it (text-only mode) so the
+    // results reappear right where you left them — no location prompt, since
+    // the centre is already known.
+    if (savedQuery) {
+      const ni = document.getElementById('name-search');
+      if (ni) ni.value = savedQuery;
+      nameFilter = savedQuery.trim().toLowerCase();
+      renderList();
+      if (MAP_DISABLED) runTextSearch(savedQuery);
+    }
+
+    // Nothing to return to, but a location is already known (a remembered
+    // place) — open on what's nearby right away. When we still have to locate,
+    // onLocated fires this instead as soon as the fix lands.
+    if (!savedQuery && savedCenter) maybeRunDefaultSearch();
 
     // Auto-locate on a truly fresh start (nothing remembered), and also when
     // the only thing remembered was an automatic label — otherwise the box

@@ -22,9 +22,14 @@
     <div class="relative rounded-xl overflow-hidden bg-slate-100 aspect-square">
       <img src="{{ photo.image.url }}" alt="{{ photo.caption|default:'Photo' }}"
            class="w-full h-full object-cover">
-      {% if photo.caption %}
-      <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5">
+      {% if photo.item or photo.caption %}
+      <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5 space-y-0.5">
+        {% if photo.item %}
+        <p class="text-[10px] font-semibold text-amber-300">🍽️ {{ photo.item.name }}</p>
+        {% endif %}
+        {% if photo.caption %}
         <p class="text-xs text-white truncate">{{ photo.caption }}</p>
+        {% endif %}
       </div>
       {% endif %}
       {% if user|is_superuser_role or photo.uploaded_by == user %}
@@ -98,6 +103,16 @@
       {% endif %}
     </div>
 
+    {% if location.items.all %}
+    <div>
+      <label class="block text-xs font-medium text-slate-600 mb-1">Dish (optional)</label>
+      {{ photo_form.item }}
+      {% if photo_form.item.errors %}
+      <p class="text-red-500 text-xs mt-1">{{ photo_form.item.errors|join:", " }}</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
     <div>
       <label class="block text-xs font-medium text-slate-600 mb-1">Caption</label>
       {{ photo_form.caption }}
@@ -126,10 +141,10 @@
 </div>
 
 <style>
-  #photos-section input[type="text"] {
+  #photos-section input[type="text"], #photos-section select {
     display: block; width: 100%; font-size: 0.8125rem;
     border: 1px solid #e2e8f0; border-radius: 0.5rem;
     padding: 0.375rem 0.625rem; outline: none;
   }
-  #photos-section input:focus { border-color: #6366f1; box-shadow: 0 0 0 2px #e0e7ff; }
+  #photos-section input:focus, #photos-section select:focus { border-color: #6366f1; box-shadow: 0 0 0 2px #e0e7ff; }
 </style>

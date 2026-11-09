@@ -11,32 +11,32 @@
       {% endif %}
     </div>
 
-    <div class="px-6 py-5 space-y-4 text-sm text-slate-600">
-      <p>1. Scan this QR code with an authenticator app (Google Authenticator, Authy, 1Password, etc.).</p>
-      <div class="flex justify-center">
-        <img src="{{ qr }}" alt="TOTP QR code" width="200" height="200"
-             class="rounded-lg border border-slate-200">
-      </div>
-      <details class="text-xs text-slate-400">
-        <summary class="cursor-pointer">Can't scan? Enter this key manually</summary>
-        <code class="block mt-1 break-all bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-600">{{ secret }}</code>
-      </details>
+    <div class="px-6 py-5 space-y-3 text-sm text-slate-600">
+      <p>Choose a method — either one is enough to sign in.</p>
 
-      <p>2. Enter the 6-digit code your app shows:</p>
-      {% if error %}
-      <p class="text-red-500 text-xs">{{ error }}</p>
-      {% endif %}
-      <form method="post" class="space-y-3">
-        {% csrf_token %}
-        <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code"
-               pattern="[0-9]*" maxlength="6" placeholder="123456" autofocus
-               class="block w-full text-center tracking-[0.4em] text-lg font-mono border border-slate-200
-                      rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand">
-        <button type="submit"
-                class="w-full bg-brand hover:bg-brand-dark text-white font-semibold px-5 py-2.5 rounded-lg transition-colors">
-          Verify &amp; enable
-        </button>
-      </form>
+      <a href="{% url 'two_factor_setup_passkey' %}"
+         class="block border-2 border-brand/30 hover:border-brand bg-brand/5 rounded-xl px-4 py-4 transition-colors">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">🔑</span>
+          <div>
+            <p class="font-semibold text-slate-900">Set up a passkey
+              <span class="text-[10px] font-bold uppercase tracking-wide text-brand bg-brand/10 px-1.5 py-0.5 rounded ml-1">Recommended</span>
+            </p>
+            <p class="text-xs text-slate-500 mt-0.5">Face ID, Touch ID, Windows Hello, or a hardware security key.</p>
+          </div>
+        </div>
+      </a>
+
+      <a href="{% url 'two_factor_setup_totp' %}"
+         class="block border border-slate-200 hover:border-slate-300 rounded-xl px-4 py-4 transition-colors">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">⌨️</span>
+          <div>
+            <p class="font-semibold text-slate-900">Set up an authenticator app</p>
+            <p class="text-xs text-slate-500 mt-0.5">Google Authenticator, Authy, 1Password, etc. — a secondary/backup option.</p>
+          </div>
+        </div>
+      </a>
     </div>
 
     <div class="px-6 py-4 border-t border-slate-100 bg-slate-50">

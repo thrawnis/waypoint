@@ -190,8 +190,10 @@
   <section id="security" class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 scroll-mt-20">
     <h2 class="text-lg font-bold text-slate-900">Account &amp; security</h2>
     <p class="text-sm text-slate-600 mt-1.5 leading-relaxed">
-      Protect your account with <strong>two-factor authentication</strong> (a TOTP app like Google
-      Authenticator or Authy). It's optional for regular members and required for admins.
+      Protect your account with <strong>two-factor authentication</strong> — a <strong>passkey</strong>
+      (recommended: Face ID, Touch ID, Windows Hello, or a hardware key) or a TOTP app like Google
+      Authenticator or Authy. Either one is enough to sign in; it's optional for regular members
+      and required for admins.
     </p>
     <div class="mt-3 text-sm">
       <a href="{% url 'two_factor_settings' %}" class="font-semibold text-brand hover:underline">Two-factor settings →</a>

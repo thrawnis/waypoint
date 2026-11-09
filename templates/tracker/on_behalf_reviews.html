@@ -29,7 +29,7 @@
       {% endif %}
     </div>
     <p class="text-xs text-slate-500 mt-1">
-      added by <strong class="text-slate-700">{{ e.by.username }}</strong> · {{ e.when|date:"M j, Y" }}
+      added by <strong class="text-slate-700">{{ e.by.username }}</strong> · {{ e.when|date:"M Y" }}
     </p>
     {% if e.notes %}
     <p class="text-sm text-slate-600 mt-1.5 whitespace-pre-line leading-snug">{{ e.notes }}</p>

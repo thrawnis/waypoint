@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Set up a passkey – Waypoint{% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto">
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-100">
+      <h1 class="text-xl font-bold text-slate-900">Set up a passkey</h1>
+      <p class="text-xs text-slate-400 mt-1">The default/recommended method — an <a href="{% url 'two_factor_setup_totp' %}" class="text-brand hover:underline">authenticator app</a> works too.</p>
+      {% if required %}
+      <p class="text-sm text-amber-700 mt-1">Two-factor authentication is required for admin accounts.</p>
+      {% endif %}
+    </div>
+
+    <div class="px-6 py-5 space-y-4 text-sm text-slate-600">
+      <p>Your browser will prompt you for Face ID, Touch ID, Windows Hello, a security key, or whatever your
+         device supports.</p>
+
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Name this passkey (optional)</label>
+        <input type="text" id="passkey-name" placeholder="e.g. iPhone, YubiKey"
+               class="block w-full text-sm border border-slate-200 rounded-lg px-3 py-2
+                      focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand">
+      </div>
+
+      <p id="passkey-error" class="text-red-500 text-xs hidden"></p>
+
+      <button id="passkey-create-btn" type="button"
+              class="w-full bg-brand hover:bg-brand-dark text-white font-semibold px-5 py-2.5 rounded-lg
+                     transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
+        Create passkey
+      </button>
+      <p id="passkey-unsupported" class="text-xs text-amber-600 hidden">
+        This browser doesn't support passkeys — use an
+        <a href="{% url 'two_factor_setup_totp' %}" class="underline">authenticator app</a> instead.
+      </p>
+    </div>
+
+    <div class="px-6 py-4 border-t border-slate-100 bg-slate-50">
+      <form method="post" action="{% url 'logout' %}">
+        {% csrf_token %}
+        <button type="submit" class="text-sm text-slate-500 hover:text-red-600">Sign out</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const CSRF_TOKEN = '{{ csrf_token }}';
+  const btn = document.getElementById('passkey-create-btn');
+  const errEl = document.getElementById('passkey-error');
+  const nameInput = document.getElementById('passkey-name');
+
+  function showError(msg) {
+    errEl.textContent = msg;
+    errEl.classList.remove('hidden');
+  }
+
+  // WebAuthn options arrive from the server as base64url strings (per the
+  // spec's own JSON serialisation) but the browser API needs ArrayBuffers —
+  // and vice versa for the response we send back.
+  function base64urlToBuffer(b64url) {
+    const pad = '='.repeat((4 - b64url.length % 4) % 4);
+    const b64 = (b64url + pad).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(b64);
+    const buf = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
+    return buf;
+  }
+  function bufferToBase64url(buf) {
+    const bytes = new Uint8Array(buf);
+    let str = '';
+    for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
+    return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  if (!window.PublicKeyCredential) {
+    btn.classList.add('hidden');
+    document.getElementById('passkey-unsupported').classList.remove('hidden');
+    return;
+  }
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    errEl.classList.add('hidden');
+    try {
+      const optsRes = await fetch('{% url "passkey_register_options" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN },
+      });
+      if (!optsRes.ok) throw new Error('Could not start passkey setup.');
+      const options = await optsRes.json();
+
+      options.challenge = base64urlToBuffer(options.challenge);
+      options.user.id = base64urlToBuffer(options.user.id);
+      if (options.excludeCredentials) {
+        options.excludeCredentials.forEach(c => { c.id = base64urlToBuffer(c.id); });
+      }
+
+      const credential = await navigator.credentials.create({ publicKey: options });
+
+      const payload = {
+        id: credential.id,
+        rawId: bufferToBase64url(credential.rawId),
+        type: credential.type,
+        response: {
+          clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+          attestationObject: bufferToBase64url(credential.response.attestationObject),
+        },
+        _name: nameInput.value || '',
+      };
+
+      const verifyRes = await fetch('{% url "passkey_register_verify" %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
+        body: JSON.stringify(payload),
+      });
+      const data = await verifyRes.json();
+      if (!verifyRes.ok) throw new Error(data.error || 'That passkey could not be registered.');
+      window.location.href = data.redirect;
+    } catch (err) {
+      if (err.name === 'NotAllowedError') {
+        showError('Cancelled, or your browser/device denied the request.');
+      } else {
+        showError(err.message || 'Something went wrong setting up that passkey.');
+      }
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
+{% endblock %}

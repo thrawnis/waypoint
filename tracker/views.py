@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import re
 import urllib.request
@@ -27,15 +28,18 @@ from .forms import (
     CollectionEditForm, CollectionForm, ItemForm, ItemReviewForm, LocationForm,
     LocationReviewForm, PhotoForm, RegisterForm, TakeoutImportForm,
 )
+
 from .models import (
     AuditLog, ChainGroup, Collection, Connection, ConnectToken, EmailVerification,
     FriendGroup, FriendGroupJoinRequest,
     FriendGroupMembership, GlutenFreeVote, Item, ItemReview,
     Location, LocationReview, OsmSearchCache, PendingRegistration, Photo,
-    TermsAcceptance, TOTPDevice,
+    TermsAcceptance, TOTPDevice, WebAuthnCredential,
 )
-from .permissions import SUPERUSER_GROUP_NAME, can_edit_location, is_admin, is_superuser_role
+from .permissions import SUPERUSER_GROUP_NAME, can_edit_location, is_admin, is_superuser_role, user_has_mfa
 from .ratelimit import get_client_ip, ratelimit
+
+logger = logging.getLogger(__name__)
 
 
 # ── Roles ─────────────────────────────────────────────────────────────────────
@@ -138,6 +142,24 @@ def _login_clear(username, ip):
     cache.delete(_login_throttle_key(username, ip))
 
 
+_PASSKEY_LOGIN_MAX_ATTEMPTS = 8
+_PASSKEY_LOGIN_WINDOW_SECONDS = 300   # 5 minutes
+
+
+def _passkey_login_throttled(ip):
+    # Keyed by IP alone — there's no username to pair it with, since the
+    # whole point of this flow is identifying the user from the credential.
+    return cache.get(f"passkey_login_fail_{ip}", 0) >= _PASSKEY_LOGIN_MAX_ATTEMPTS
+
+
+def _passkey_login_record_failure(ip):
+    key = f"passkey_login_fail_{ip}"
+    try:
+        cache.incr(key)
+    except ValueError:
+        cache.add(key, 1, _PASSKEY_LOGIN_WINDOW_SECONDS)
+
+
 def login_view(request):
     if request.user.is_authenticated:
         return redirect("location_list")
@@ -152,9 +174,9 @@ def login_view(request):
         if form.is_valid():
             _login_clear(username, ip)
             user = form.get_user()
-            device = TOTPDevice.objects.filter(user=user, confirmed=True).first()
-            if device:
-                # Password OK, but 2FA is enabled — require the code before login.
+            if user_has_mfa(user):
+                # Password OK, but 2FA is enabled — require a passkey or
+                # authenticator code before login.
                 request.session["pre_2fa_user"] = user.pk
                 request.session["pre_2fa_next"] = nxt
                 return redirect("two_factor_verify")
@@ -171,7 +193,7 @@ def logout_view(request):
     return redirect("location_list")
 
 
-# ── Two-factor authentication (TOTP) ───────────────────────────────────────────
+# ── Two-factor authentication (passkey default, TOTP backup) ──────────────────
 
 def _totp_qr_data_uri(secret, user):
     import io, base64, pyotp, qrcode
@@ -196,7 +218,7 @@ _2FA_WINDOW_SECONDS = 300      # 5 minutes
 
 
 def _twofa_throttled(user_pk):
-    """True if this user has burned too many wrong codes recently."""
+    """True if this user has burned too many wrong codes/passkey attempts recently."""
     return cache.get(f"twofa_fail_{user_pk}", 0) >= _2FA_MAX_ATTEMPTS
 
 
@@ -209,43 +231,264 @@ def _twofa_record_failure(user_pk):
         cache.set(key, 1, _2FA_WINDOW_SECONDS)
 
 
-def two_factor_verify(request):
-    """Second login step: enter the authenticator code. Reached from login_view
-    for users who have 2FA enabled (they are not yet logged in here)."""
+def _setup_target_user(request):
+    """(user, pending) for whoever is in the middle of MFA setup: either a
+    signed-in user adding a method (optionally, or because an admin was
+    forced here post-login by TwoFactorMiddleware), or — mirroring
+    two_factor_verify — someone whose password already checked out but who
+    has no MFA configured yet and so isn't fully logged in here."""
+    if request.user.is_authenticated:
+        return request.user, False
     uid = request.session.get("pre_2fa_user")
-    if not uid:
-        return redirect("login")
-    device = TOTPDevice.objects.filter(user_id=uid, confirmed=True).select_related("user").first()
-    if not device:
+    if uid:
+        user = User.objects.filter(pk=uid).first()
+        if user:
+            return user, True
+    return None, False
+
+
+def _webauthn_rp_id(request):
+    """Relying-party ID: just the current request's hostname (no scheme or
+    port). Derived per-request rather than a fixed setting — a browser only
+    ever accepts an rp_id equal to the page's own domain anyway, so there's
+    nothing to configure beyond what's already serving the app."""
+    return request.get_host().split(":")[0]
+
+
+def _webauthn_origin(request):
+    # Deliberately not request.is_secure(): some reverse-proxy setups forward
+    # X-Forwarded-Proto inconsistently (e.g. a double hop producing "https,
+    # http" rather than a clean "https"), which makes is_secure() return
+    # False even though every real client reaches the site over HTTPS.
+    # HTTPS_ENABLED already tells us that's the deployment's only mode, so
+    # trust it over the per-request header for this specific check.
+    scheme = "https" if (settings.HTTPS_ENABLED or request.is_secure()) else "http"
+    return "{}://{}".format(scheme, request.get_host())
+
+
+def _user_credential_descriptors(user):
+    from webauthn.helpers.structs import PublicKeyCredentialDescriptor
+    return [
+        PublicKeyCredentialDescriptor(id=bytes(c.credential_id))
+        for c in WebAuthnCredential.objects.filter(user=user)
+    ]
+
+
+def two_factor_verify(request):
+    """Second login step: a passkey (the default method) or an authenticator
+    code (the secondary one) — either satisfies it. Reached from login_view
+    for users who have some MFA method enabled (they are not yet logged in
+    here). The passkey ceremony itself runs via passkey_auth_options/
+    passkey_auth_verify below; this view only ever handles the code form."""
+    uid = request.session.get("pre_2fa_user")
+    user = User.objects.filter(pk=uid).first() if uid else None
+    has_passkey = user is not None and WebAuthnCredential.objects.filter(user=user).exists()
+    device = (
+        TOTPDevice.objects.filter(user_id=uid, confirmed=True).first()
+        if user is not None else None
+    )
+    if user is None or (not has_passkey and not device):
         request.session.pop("pre_2fa_user", None)
         return redirect("login")
     error = None
     if request.method == "POST":
-        if _twofa_throttled(device.user_id):
+        if _twofa_throttled(uid):
             error = "Too many attempts — wait a few minutes and try again."
-        elif _totp_valid(device.secret, request.POST.get("code", "")):
+        elif device and _totp_valid(device.secret, request.POST.get("code", "")):
             nxt = _safe_next(request.session.pop("pre_2fa_next", "") or "")
             request.session.pop("pre_2fa_user", None)
-            login(request, device.user)
+            login(request, user)
             return redirect(nxt or "location_list")
         else:
-            _twofa_record_failure(device.user_id)
+            _twofa_record_failure(uid)
             error = "That code didn't match. Try again."
-    return render(request, "registration/two_factor_verify.html", {"error": error})
+    return render(request, "registration/two_factor_verify.html", {
+        "error": error,
+        "has_passkey": has_passkey,
+        "has_totp": device is not None,
+    })
+
+
+@require_POST
+def passkey_auth_options(request):
+    """Step 1 of the passkey login ceremony: generate a WebAuthn
+    authentication challenge scoped to the pending user's own credentials."""
+    uid = request.session.get("pre_2fa_user")
+    user = User.objects.filter(pk=uid).first() if uid else None
+    if user is None:
+        return JsonResponse({"error": "Session expired — please log in again."}, status=400)
+    from webauthn import generate_authentication_options, options_to_json
+    from webauthn.helpers import bytes_to_base64url
+    from webauthn.helpers.structs import UserVerificationRequirement
+
+    options = generate_authentication_options(
+        rp_id=_webauthn_rp_id(request),
+        allow_credentials=_user_credential_descriptors(user),
+        user_verification=UserVerificationRequirement.PREFERRED,
+    )
+    request.session["passkey_auth_challenge"] = bytes_to_base64url(options.challenge)
+    return HttpResponse(options_to_json(options), content_type="application/json")
+
+
+@require_POST
+def passkey_auth_verify(request):
+    """Step 2: verify the browser's assertion and, on success, complete login
+    exactly like a correct TOTP code would."""
+    uid = request.session.get("pre_2fa_user")
+    user = User.objects.filter(pk=uid).first() if uid else None
+    if user is None:
+        return JsonResponse({"error": "Session expired — please log in again."}, status=400)
+    if _twofa_throttled(uid):
+        return JsonResponse({"error": "Too many attempts — wait a few minutes and try again."}, status=429)
+    challenge_b64 = request.session.get("passkey_auth_challenge")
+    if not challenge_b64:
+        return JsonResponse({"error": "No pending passkey challenge — try again."}, status=400)
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return JsonResponse({"error": "Malformed request."}, status=400)
+
+    from webauthn.helpers import base64url_to_bytes
+    try:
+        credential_id = base64url_to_bytes(body.get("rawId") or "")
+    except Exception:
+        return JsonResponse({"error": "Malformed credential."}, status=400)
+
+    cred = WebAuthnCredential.objects.filter(user=user, credential_id=credential_id).first()
+    if not cred:
+        _twofa_record_failure(uid)
+        return JsonResponse({"error": "Unrecognized passkey."}, status=400)
+
+    from webauthn import verify_authentication_response
+    try:
+        verification = verify_authentication_response(
+            credential=body,
+            expected_challenge=base64url_to_bytes(challenge_b64),
+            expected_rp_id=_webauthn_rp_id(request),
+            expected_origin=_webauthn_origin(request),
+            credential_public_key=bytes(cred.public_key),
+            credential_current_sign_count=cred.sign_count,
+        )
+    except Exception:
+        logger.exception("Passkey authentication verification failed for user %s", user.pk)
+        _twofa_record_failure(uid)
+        return JsonResponse({"error": "That passkey didn't verify. Try again."}, status=400)
+
+    cred.sign_count = verification.new_sign_count
+    cred.last_used_at = timezone.now()
+    cred.save(update_fields=["sign_count", "last_used_at"])
+
+    request.session.pop("passkey_auth_challenge", None)
+    nxt = _safe_next(request.session.pop("pre_2fa_next", "") or "")
+    request.session.pop("pre_2fa_user", None)
+    login(request, user)
+    return JsonResponse({"redirect": nxt or reverse("location_list")})
+
+
+@require_POST
+def passkey_login_options(request):
+    """Passwordless sign-in, step 1: no username is collected at all — the
+    browser is simply asked for any discoverable passkey it holds for this
+    site (no allow_credentials list to narrow it down), and the credential
+    it returns is what identifies the user in passkey_login_verify below."""
+    if request.user.is_authenticated:
+        return JsonResponse({"error": "Already signed in."}, status=400)
+    ip = _get_ip(request)
+    if _passkey_login_throttled(ip):
+        return JsonResponse({"error": "Too many attempts — wait a few minutes and try again."}, status=429)
+    from webauthn import generate_authentication_options, options_to_json
+    from webauthn.helpers import bytes_to_base64url
+    from webauthn.helpers.structs import UserVerificationRequirement
+
+    options = generate_authentication_options(
+        rp_id=_webauthn_rp_id(request),
+        # Required, not preferred: with no password involved at all, the
+        # passkey's own user-verification (biometric/PIN) is the only proof
+        # of presence this login has, so it can't be skipped.
+        user_verification=UserVerificationRequirement.REQUIRED,
+    )
+    request.session["passkey_login_challenge"] = bytes_to_base64url(options.challenge)
+    return HttpResponse(options_to_json(options), content_type="application/json")
+
+
+@require_POST
+def passkey_login_verify(request):
+    """Step 2: identify the user from the credential ID the browser returned
+    (no username was ever submitted) and verify the assertion. This alone
+    completes login — a passkey already satisfies MFA on its own, so unlike
+    the password path, there's no separate two_factor_verify step after it."""
+    if request.user.is_authenticated:
+        return JsonResponse({"error": "Already signed in."}, status=400)
+    ip = _get_ip(request)
+    if _passkey_login_throttled(ip):
+        return JsonResponse({"error": "Too many attempts — wait a few minutes and try again."}, status=429)
+    challenge_b64 = request.session.get("passkey_login_challenge")
+    if not challenge_b64:
+        return JsonResponse({"error": "No pending passkey challenge — try again."}, status=400)
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return JsonResponse({"error": "Malformed request."}, status=400)
+    nxt = _safe_next(body.pop("_next", "") or "")
+
+    from webauthn.helpers import base64url_to_bytes
+    try:
+        credential_id = base64url_to_bytes(body.get("rawId") or "")
+    except Exception:
+        return JsonResponse({"error": "Malformed credential."}, status=400)
+
+    cred = WebAuthnCredential.objects.filter(credential_id=credential_id).select_related("user").first()
+    if not cred:
+        _passkey_login_record_failure(ip)
+        return JsonResponse({"error": "Unrecognized passkey."}, status=400)
+
+    from webauthn import verify_authentication_response
+    try:
+        verification = verify_authentication_response(
+            credential=body,
+            expected_challenge=base64url_to_bytes(challenge_b64),
+            expected_rp_id=_webauthn_rp_id(request),
+            expected_origin=_webauthn_origin(request),
+            credential_public_key=bytes(cred.public_key),
+            credential_current_sign_count=cred.sign_count,
+            require_user_verification=True,
+        )
+    except Exception:
+        logger.exception("Passwordless passkey login failed for credential %s", cred.pk)
+        _passkey_login_record_failure(ip)
+        return JsonResponse({"error": "That passkey didn't verify. Try again."}, status=400)
+
+    cred.sign_count = verification.new_sign_count
+    cred.last_used_at = timezone.now()
+    cred.save(update_fields=["sign_count", "last_used_at"])
+
+    request.session.pop("passkey_login_challenge", None)
+    login(request, cred.user)
+    return JsonResponse({"redirect": nxt or reverse("location_list")})
 
 
 def two_factor_setup(request):
-    """Show the QR code and confirm a code to enable 2FA. Works both for a
-    signed-in user enabling it optionally, and for an admin who was sent here
-    (still pending login) because 2FA is required."""
+    """Entry point for setting up MFA: a passkey (the default/recommended
+    method) or an authenticator app (the secondary one). Works both for a
+    signed-in user adding a method optionally, and for an admin who was sent
+    here (still pending login) because MFA is required."""
+    user, pending = _setup_target_user(request)
+    if user is None:
+        return redirect("login")
+    if user_has_mfa(user):
+        # Already has a method — nothing to force. A pending user shouldn't
+        # normally reach this page at all (login_view would have sent them
+        # to verify instead), but don't strand them here if they do.
+        return redirect("two_factor_verify" if pending else "two_factor_settings")
+    return render(request, "registration/two_factor_setup.html", {"required": user.is_staff})
+
+
+def two_factor_setup_totp(request):
+    """Authenticator-app setup/confirm — the secondary MFA method."""
     import pyotp
-    if request.user.is_authenticated:
-        user, pending = request.user, False
-    else:
-        uid = request.session.get("pre_2fa_user")
-        if not uid:
-            return redirect("login")
-        user, pending = get_object_or_404(User, pk=uid), True
+    user, pending = _setup_target_user(request)
+    if user is None:
+        return redirect("login")
 
     device, _ = TOTPDevice.objects.get_or_create(
         user=user, defaults={"secret": pyotp.random_base32()}
@@ -269,7 +512,7 @@ def two_factor_setup(request):
             return redirect("location_list")
         error = "That code didn't match — check your device's time and try again."
 
-    return render(request, "registration/two_factor_setup.html", {
+    return render(request, "registration/two_factor_setup_totp.html", {
         "qr": _totp_qr_data_uri(device.secret, user),
         "secret": device.secret,
         "error": error,
@@ -277,11 +520,114 @@ def two_factor_setup(request):
     })
 
 
+def two_factor_setup_passkey(request):
+    """Passkey setup — the default MFA method. The actual WebAuthn ceremony
+    runs client-side against passkey_register_options/passkey_register_verify
+    below; this just renders the page (and confirms there's actually someone
+    pending/signed-in to set it up for)."""
+    user, pending = _setup_target_user(request)
+    if user is None:
+        return redirect("login")
+    return render(request, "registration/two_factor_setup_passkey.html", {"required": user.is_staff})
+
+
+@require_POST
+def passkey_register_options(request):
+    """Step 1 of registering a passkey: generate a WebAuthn registration
+    challenge for whoever is mid-setup (see _setup_target_user)."""
+    user, pending = _setup_target_user(request)
+    if user is None:
+        return JsonResponse({"error": "Please log in again."}, status=400)
+    from webauthn import generate_registration_options, options_to_json
+    from webauthn.helpers import bytes_to_base64url
+    from webauthn.helpers.cose import COSEAlgorithmIdentifier
+    from webauthn.helpers.structs import AuthenticatorSelectionCriteria, ResidentKeyRequirement
+
+    options = generate_registration_options(
+        rp_id=_webauthn_rp_id(request),
+        rp_name="Waypoint",
+        user_id=str(user.pk).encode(),
+        user_name=user.username,
+        user_display_name=user.email or user.username,
+        exclude_credentials=_user_credential_descriptors(user),
+        # Discoverable (resident) credentials are what let a browser offer
+        # "sign in with a passkey" without a username typed in first.
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.PREFERRED,
+        ),
+        # ES256 only: offering the full default algorithm list (EdDSA, ES512,
+        # various RSA variants) has been seen to make some passkey providers
+        # (e.g. Bitwarden's) fail outright during creation with an opaque
+        # vendor error, rather than just picking the one they do support.
+        # ES256 alone is already supported essentially everywhere.
+        supported_pub_key_algs=[COSEAlgorithmIdentifier.ECDSA_SHA_256],
+    )
+    request.session["passkey_reg_challenge"] = bytes_to_base64url(options.challenge)
+    request.session["passkey_reg_user"] = user.pk
+    return HttpResponse(options_to_json(options), content_type="application/json")
+
+
+@require_POST
+def passkey_register_verify(request):
+    """Step 2: verify the browser's attestation response and save the
+    resulting credential. For a pending (not-yet-logged-in) admin forced
+    through setup, this also completes their login."""
+    user, pending = _setup_target_user(request)
+    if user is None or request.session.get("passkey_reg_user") != user.pk:
+        return JsonResponse({"error": "Please log in again."}, status=400)
+    challenge_b64 = request.session.get("passkey_reg_challenge")
+    if not challenge_b64:
+        return JsonResponse({"error": "No pending passkey registration — try again."}, status=400)
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return JsonResponse({"error": "Malformed request."}, status=400)
+    name = (body.pop("_name", "") or "").strip()[:100]
+
+    from webauthn import verify_registration_response
+    from webauthn.helpers import base64url_to_bytes
+    try:
+        verification = verify_registration_response(
+            credential=body,
+            expected_challenge=base64url_to_bytes(challenge_b64),
+            expected_rp_id=_webauthn_rp_id(request),
+            expected_origin=_webauthn_origin(request),
+        )
+    except Exception:
+        logger.exception(
+            "Passkey registration verification failed for user %s (rp_id=%r origin=%r)",
+            user.pk, _webauthn_rp_id(request), _webauthn_origin(request),
+        )
+        return JsonResponse({"error": "That passkey couldn't be registered. Try again."}, status=400)
+
+    WebAuthnCredential.objects.create(
+        user=user,
+        credential_id=verification.credential_id,
+        public_key=verification.credential_public_key,
+        sign_count=verification.sign_count,
+        name=name,
+    )
+    request.session.pop("passkey_reg_challenge", None)
+    request.session.pop("passkey_reg_user", None)
+
+    redirect_url = reverse("two_factor_settings")
+    if pending:
+        nxt = _safe_next(request.session.pop("pre_2fa_next", "") or "")
+        request.session.pop("pre_2fa_user", None)
+        login(request, user)
+        redirect_url = nxt or reverse("location_list")
+    else:
+        messages.success(request, "Passkey added.")
+    return JsonResponse({"redirect": redirect_url})
+
+
 @login_required
 def two_factor_settings(request):
-    enabled = TOTPDevice.objects.filter(user=request.user, confirmed=True).exists()
+    passkeys = list(WebAuthnCredential.objects.filter(user=request.user))
+    totp_enabled = TOTPDevice.objects.filter(user=request.user, confirmed=True).exists()
     return render(request, "registration/two_factor_settings.html", {
-        "enabled": enabled,
+        "passkeys": passkeys,
+        "totp_enabled": totp_enabled,
         "required": request.user.is_staff,
     })
 
@@ -289,11 +635,31 @@ def two_factor_settings(request):
 @login_required
 @require_POST
 def two_factor_disable(request):
-    if request.user.is_staff:
-        messages.error(request, "Admins can't turn off two-factor authentication.")
+    """Turns off the authenticator-app (TOTP) method specifically — a
+    separate passkey, if any, is untouched. Blocked only if this would leave
+    an admin with no MFA method at all."""
+    if request.user.is_staff and not WebAuthnCredential.objects.filter(user=request.user).exists():
+        messages.error(request, "Admins must have at least one MFA method — set up a passkey first.")
         return redirect("two_factor_settings")
     TOTPDevice.objects.filter(user=request.user).delete()
-    messages.success(request, "Two-factor authentication disabled.")
+    messages.success(request, "Authenticator app disabled.")
+    return redirect("two_factor_settings")
+
+
+@login_required
+@require_POST
+def passkey_delete(request, pk):
+    """Removes one passkey. Blocked only if this would leave an admin with no
+    MFA method at all (another passkey or a confirmed TOTP device is fine)."""
+    cred = get_object_or_404(WebAuthnCredential, pk=pk, user=request.user)
+    if request.user.is_staff:
+        other_passkey = WebAuthnCredential.objects.filter(user=request.user).exclude(pk=cred.pk).exists()
+        totp_enabled = TOTPDevice.objects.filter(user=request.user, confirmed=True).exists()
+        if not other_passkey and not totp_enabled:
+            messages.error(request, "Admins must have at least one MFA method — set up another one first.")
+            return redirect("two_factor_settings")
+    cred.delete()
+    messages.success(request, "Passkey removed.")
     return redirect("two_factor_settings")
 
 
@@ -715,7 +1081,7 @@ def location_detail(request, pk):
     return render(request, "tracker/location_detail.html", {
         "location": location,
         "item_form": ItemForm(),
-        "photo_form": PhotoForm(),
+        "photo_form": PhotoForm(location=location),
         "my_review": my_review,
         "gf_my_vote": gf_my_vote,
         "all_collections": Collection.objects.filter(created_by=request.user),
@@ -1315,7 +1681,7 @@ def item_delete(request, pk, item_pk):
 def _render_photos_section(request, location, photo_form=None, show_form=False):
     return render(request, "tracker/partials/photos_section.html", {
         "location": location,
-        "photo_form": photo_form or PhotoForm(),
+        "photo_form": photo_form or PhotoForm(location=location),
         "show_form": show_form,
     })
 
@@ -1324,13 +1690,15 @@ def _render_photos_section(request, location, photo_form=None, show_form=False):
 def photo_add(request, pk):
     location = get_object_or_404(Location, pk=pk)
     if request.method == "POST":
-        form = PhotoForm(request.POST, request.FILES)
+        form = PhotoForm(request.POST, request.FILES, location=location)
         if form.is_valid():
             photo = form.save(commit=False)
             photo.location = location
             photo.uploaded_by = request.user
             photo.save()
             detail = 'Uploaded photo to "{}"'.format(location.name)
+            if photo.item:
+                detail += ' tagged as "{}"'.format(photo.item.name)
             if photo.caption:
                 detail += ' with caption "{}"'.format(photo.caption)
             _log(request, AuditLog.ACTION_CREATE, photo, detail)

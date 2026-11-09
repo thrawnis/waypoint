@@ -292,10 +292,19 @@ class TakeoutImportForm(forms.Form):
 class PhotoForm(forms.ModelForm):
     class Meta:
         model = Photo
-        fields = ["image", "caption"]
+        fields = ["image", "item", "caption"]
         widgets = {
             "caption": forms.TextInput(attrs={"placeholder": "Caption (optional)"}),
         }
+
+    def __init__(self, *args, location=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Only this waypoint's own dishes are valid choices, and there's
+        # nothing to tag at all on a waypoint with no items yet.
+        qs = location.items.all() if location is not None else Item.objects.none()
+        self.fields["item"].queryset = qs
+        self.fields["item"].required = False
+        self.fields["item"].empty_label = "No dish (general photo)"
 
     def clean_image(self):
         image = self.cleaned_data.get("image")

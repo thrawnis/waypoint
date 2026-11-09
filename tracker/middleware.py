@@ -33,7 +33,9 @@ class HtmxRedirectMiddleware:
 _GATE_EXEMPT_NAMES = (
     "logout",
     "verify_email", "verify_email_resend", "verify_email_confirm", "register_confirm",
-    "two_factor_setup", "two_factor_verify", "two_factor_disable", "two_factor_settings",
+    "two_factor_setup", "two_factor_setup_totp", "two_factor_setup_passkey",
+    "two_factor_verify", "two_factor_disable", "two_factor_settings",
+    "passkey_register_options", "passkey_register_verify", "passkey_delete",
     "terms", "terms_accept", "terms_decline",
 )
 
@@ -74,9 +76,11 @@ class EmailVerificationMiddleware:
 
 
 class TwoFactorMiddleware:
-    """Admins must have two-factor authentication enabled. Any signed-in admin
-    without a confirmed TOTP device is redirected to the setup page until they
-    finish. Optional (unenforced) for non-admin users."""
+    """Admins must have two-factor authentication enabled — a passkey (the
+    default/primary method) or a confirmed TOTP device (the secondary one);
+    either alone is enough. Any signed-in admin with neither is redirected
+    to the setup page until they finish. Optional (unenforced) for non-admin
+    users."""
 
     def __init__(self, get_response):
         self.get_response = get_response
@@ -85,8 +89,8 @@ class TwoFactorMiddleware:
         user = getattr(request, "user", None)
         if user is not None and user.is_authenticated and user.is_staff:
             if not request.session.get("twofa_ok") and not _is_gate_exempt(request):
-                from .models import TOTPDevice
-                if TOTPDevice.objects.filter(user=user, confirmed=True).exists():
+                from .permissions import user_has_mfa
+                if user_has_mfa(user):
                     request.session["twofa_ok"] = True
                 else:
                     return redirect("two_factor_setup")

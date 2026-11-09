@@ -3,11 +3,22 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    # Two-factor authentication (TOTP)
+    # Two-factor authentication — passkey (default) or TOTP (secondary)
     path("2fa/setup/", views.two_factor_setup, name="two_factor_setup"),
+    path("2fa/setup/totp/", views.two_factor_setup_totp, name="two_factor_setup_totp"),
+    path("2fa/setup/passkey/", views.two_factor_setup_passkey, name="two_factor_setup_passkey"),
     path("2fa/verify/", views.two_factor_verify, name="two_factor_verify"),
+    path("2fa/verify/passkey/options/", views.passkey_auth_options, name="passkey_auth_options"),
+    path("2fa/verify/passkey/verify/", views.passkey_auth_verify, name="passkey_auth_verify"),
     path("2fa/settings/", views.two_factor_settings, name="two_factor_settings"),
     path("2fa/disable/", views.two_factor_disable, name="two_factor_disable"),
+    path("2fa/passkey/register/options/", views.passkey_register_options, name="passkey_register_options"),
+    path("2fa/passkey/register/verify/", views.passkey_register_verify, name="passkey_register_verify"),
+    path("2fa/passkey/<int:pk>/delete/", views.passkey_delete, name="passkey_delete"),
+
+    # Passwordless sign-in: a passkey alone, no username/password collected
+    path("login/passkey/options/", views.passkey_login_options, name="passkey_login_options"),
+    path("login/passkey/verify/", views.passkey_login_verify, name="passkey_login_verify"),
 
     # Registration email confirmation (verify-first)
     path("register/confirm/", views.register_confirm, name="register_confirm"),

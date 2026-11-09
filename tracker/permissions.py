@@ -25,6 +25,18 @@ def is_superuser_role(user):
     return user.is_staff or user.groups.filter(name=SUPERUSER_GROUP_NAME).exists()
 
 
+def user_has_mfa(user):
+    """True if this user has at least one usable MFA method set up — a
+    registered passkey (the default/primary method) or a confirmed TOTP
+    device (the secondary/backup one). They're alternatives: either single
+    one satisfies the account's MFA requirement, never both at once."""
+    from .models import TOTPDevice, WebAuthnCredential
+    return (
+        WebAuthnCredential.objects.filter(user=user).exists()
+        or TOTPDevice.objects.filter(user=user, confirmed=True).exists()
+    )
+
+
 def can_edit_location(user, location):
     """Editing an existing waypoint's content (and structural actions like
     chain link/unlink) is limited to its creator or an elevated role —

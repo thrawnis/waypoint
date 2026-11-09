@@ -10,6 +10,9 @@ requests==2.32.3
 # TOTP two-factor auth + QR codes (qrcode uses the already-present Pillow)
 pyotp==2.9.0
 qrcode==7.4.2
+# Passkey (WebAuthn) two-factor auth — the default MFA method; TOTP above is
+# the secondary/backup option.
+webauthn==3.0.1
 # Shared cache for rate-limit / throttle counters across gunicorn workers.
 # Only used when REDIS_URL is set (see CACHES in settings); the app runs
 # without it, falling back to a per-process in-memory cache.
