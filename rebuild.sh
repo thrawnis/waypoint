@@ -9,12 +9,15 @@ IMAGE="waypoint:latest"
 # --pull-base-images: opt-in registry check for a newer base image (FROM ...).
 # Off by default — pulling the base on every rebuild is slow for basically no
 # benefit; run it manually now and then to pick up upstream base updates.
+# --force: rebuild/restart even if the pull brought in no new commits.
 PULL_BASE_IMAGES=0
+FORCE=0
 for arg in "$@"; do
   case "$arg" in
     --pull-base-images) PULL_BASE_IMAGES=1 ;;
+    --force) FORCE=1 ;;
     -h|--help)
-      echo "Usage: $(basename "$0") [--pull-base-images]"
+      echo "Usage: $(basename "$0") [--pull-base-images] [--force]"
       exit 0 ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;
   esac
@@ -26,8 +29,17 @@ git -C "$REPO" checkout "$BRANCH"
 echo "==> Discarding any local changes..."
 git -C "$REPO" reset --hard
 
+BEFORE=$(git -C "$REPO" rev-parse HEAD)
+
 echo "==> Pulling latest code..."
 git -C "$REPO" pull origin "$BRANCH"
+
+AFTER=$(git -C "$REPO" rev-parse HEAD)
+
+if [ "$BEFORE" = "$AFTER" ] && [ "$FORCE" -eq 0 ] && [ "$PULL_BASE_IMAGES" -eq 0 ]; then
+  echo "==> No new commits on $BRANCH — nothing to rebuild. (use --force to rebuild anyway)"
+  exit 0
+fi
 
 # Ensure host-side data subdirs exist before Docker mounts them
 echo "==> Creating data directories..."
