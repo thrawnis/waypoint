@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BRANCH="dev"
+BRANCH="main"
 REPO="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="$REPO/docker-compose.yml"
 IMAGE="waypoint:latest"
