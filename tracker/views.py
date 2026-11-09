@@ -142,6 +142,24 @@ def _login_clear(username, ip):
     cache.delete(_login_throttle_key(username, ip))
 
 
+_PASSKEY_LOGIN_MAX_ATTEMPTS = 8
+_PASSKEY_LOGIN_WINDOW_SECONDS = 300   # 5 minutes
+
+
+def _passkey_login_throttled(ip):
+    # Keyed by IP alone — there's no username to pair it with, since the
+    # whole point of this flow is identifying the user from the credential.
+    return cache.get(f"passkey_login_fail_{ip}", 0) >= _PASSKEY_LOGIN_MAX_ATTEMPTS
+
+
+def _passkey_login_record_failure(ip):
+    key = f"passkey_login_fail_{ip}"
+    try:
+        cache.incr(key)
+    except ValueError:
+        cache.add(key, 1, _PASSKEY_LOGIN_WINDOW_SECONDS)
+
+
 def login_view(request):
     if request.user.is_authenticated:
         return redirect("location_list")
@@ -364,6 +382,88 @@ def passkey_auth_verify(request):
     nxt = _safe_next(request.session.pop("pre_2fa_next", "") or "")
     request.session.pop("pre_2fa_user", None)
     login(request, user)
+    return JsonResponse({"redirect": nxt or reverse("location_list")})
+
+
+@require_POST
+def passkey_login_options(request):
+    """Passwordless sign-in, step 1: no username is collected at all — the
+    browser is simply asked for any discoverable passkey it holds for this
+    site (no allow_credentials list to narrow it down), and the credential
+    it returns is what identifies the user in passkey_login_verify below."""
+    if request.user.is_authenticated:
+        return JsonResponse({"error": "Already signed in."}, status=400)
+    ip = _get_ip(request)
+    if _passkey_login_throttled(ip):
+        return JsonResponse({"error": "Too many attempts — wait a few minutes and try again."}, status=429)
+    from webauthn import generate_authentication_options, options_to_json
+    from webauthn.helpers import bytes_to_base64url
+    from webauthn.helpers.structs import UserVerificationRequirement
+
+    options = generate_authentication_options(
+        rp_id=_webauthn_rp_id(request),
+        # Required, not preferred: with no password involved at all, the
+        # passkey's own user-verification (biometric/PIN) is the only proof
+        # of presence this login has, so it can't be skipped.
+        user_verification=UserVerificationRequirement.REQUIRED,
+    )
+    request.session["passkey_login_challenge"] = bytes_to_base64url(options.challenge)
+    return HttpResponse(options_to_json(options), content_type="application/json")
+
+
+@require_POST
+def passkey_login_verify(request):
+    """Step 2: identify the user from the credential ID the browser returned
+    (no username was ever submitted) and verify the assertion. This alone
+    completes login — a passkey already satisfies MFA on its own, so unlike
+    the password path, there's no separate two_factor_verify step after it."""
+    if request.user.is_authenticated:
+        return JsonResponse({"error": "Already signed in."}, status=400)
+    ip = _get_ip(request)
+    if _passkey_login_throttled(ip):
+        return JsonResponse({"error": "Too many attempts — wait a few minutes and try again."}, status=429)
+    challenge_b64 = request.session.get("passkey_login_challenge")
+    if not challenge_b64:
+        return JsonResponse({"error": "No pending passkey challenge — try again."}, status=400)
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return JsonResponse({"error": "Malformed request."}, status=400)
+    nxt = _safe_next(body.pop("_next", "") or "")
+
+    from webauthn.helpers import base64url_to_bytes
+    try:
+        credential_id = base64url_to_bytes(body.get("rawId") or "")
+    except Exception:
+        return JsonResponse({"error": "Malformed credential."}, status=400)
+
+    cred = WebAuthnCredential.objects.filter(credential_id=credential_id).select_related("user").first()
+    if not cred:
+        _passkey_login_record_failure(ip)
+        return JsonResponse({"error": "Unrecognized passkey."}, status=400)
+
+    from webauthn import verify_authentication_response
+    try:
+        verification = verify_authentication_response(
+            credential=body,
+            expected_challenge=base64url_to_bytes(challenge_b64),
+            expected_rp_id=_webauthn_rp_id(request),
+            expected_origin=_webauthn_origin(request),
+            credential_public_key=bytes(cred.public_key),
+            credential_current_sign_count=cred.sign_count,
+            require_user_verification=True,
+        )
+    except Exception:
+        logger.exception("Passwordless passkey login failed for credential %s", cred.pk)
+        _passkey_login_record_failure(ip)
+        return JsonResponse({"error": "That passkey didn't verify. Try again."}, status=400)
+
+    cred.sign_count = verification.new_sign_count
+    cred.last_used_at = timezone.now()
+    cred.save(update_fields=["sign_count", "last_used_at"])
+
+    request.session.pop("passkey_login_challenge", None)
+    login(request, cred.user)
     return JsonResponse({"redirect": nxt or reverse("location_list")})
 
 

@@ -113,6 +113,37 @@ class PasskeyFlowTests(AppTestCase):
         self.assertEqual(auth_verify.status_code, 200, auth_verify.content)
         self.assertEqual(self.client.get(reverse("location_list")).status_code, 200)
 
+    def test_passwordless_login_with_only_a_passkey(self):
+        """No username/password ever submitted — the credential alone
+        identifies and logs in the user."""
+        user = self.make_user("carol")
+        self.login(user)
+        authenticator = FakeAuthenticator()
+        options = json.loads(self.client.post(reverse("passkey_register_options")).content)
+        credential = authenticator.create(options["challenge"], "testserver", "http://testserver")
+        self.client.post(
+            reverse("passkey_register_verify"), data=json.dumps(credential), content_type="application/json",
+        )
+        self.client.logout()
+
+        login_options = json.loads(self.client.post(reverse("passkey_login_options")).content)
+        assertion = authenticator.get(login_options["challenge"], "testserver", "http://testserver")
+        verify = self.client.post(
+            reverse("passkey_login_verify"), data=json.dumps(assertion), content_type="application/json",
+        )
+        self.assertEqual(verify.status_code, 200, verify.content)
+        self.assertEqual(self.client.get(reverse("location_list")).status_code, 200)
+
+    def test_passwordless_login_rejects_unknown_credential(self):
+        authenticator = FakeAuthenticator()
+        self.client.post(reverse("passkey_login_options"))
+        bogus = {"id": "x", "rawId": _b64url(b"no-such-credential"),
+                 "type": "public-key", "response": {}}
+        resp = self.client.post(
+            reverse("passkey_login_verify"), data=json.dumps(bogus), content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
     def test_wrong_credential_id_is_rejected(self):
         user = self.make_user("bob")
         WebAuthnCredential.objects.create(user=user, credential_id=b"real-one", public_key=b"x")

@@ -16,6 +16,10 @@ urlpatterns = [
     path("2fa/passkey/register/verify/", views.passkey_register_verify, name="passkey_register_verify"),
     path("2fa/passkey/<int:pk>/delete/", views.passkey_delete, name="passkey_delete"),
 
+    # Passwordless sign-in: a passkey alone, no username/password collected
+    path("login/passkey/options/", views.passkey_login_options, name="passkey_login_options"),
+    path("login/passkey/verify/", views.passkey_login_verify, name="passkey_login_verify"),
+
     # Registration email confirmation (verify-first)
     path("register/confirm/", views.register_confirm, name="register_confirm"),
 
