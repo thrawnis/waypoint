@@ -123,3 +123,24 @@ class UnverifyMigrationTests(AppTestCase):
 
         self.assertFalse(EmailVerification.objects.get(user=fake).verified)
         self.assertTrue(EmailVerification.objects.get(user=real).verified)
+
+
+@override_settings(
+    REQUIRE_EMAIL_VERIFICATION=True,
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+)
+class PwaEndpointTests(AppTestCase):
+    """The service worker and offline page are fetched by the browser itself,
+    so the onboarding gates (e.g. email verification) must never redirect them."""
+
+    def test_service_worker_served_from_root_for_gated_user(self):
+        self.login(self.make_user("unverified"))
+        resp = self.client.get("/sw.js")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "application/javascript")
+        self.assertEqual(resp["Cache-Control"], "no-cache")
+        self.assertContains(resp, "/offline/")
+
+    def test_offline_page_is_public(self):
+        resp = self.client.get("/offline/")
+        self.assertContains(resp, "You're offline")

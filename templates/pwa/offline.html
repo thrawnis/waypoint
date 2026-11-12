@@ -1,0 +1,38 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#6366f1">
+  <title>Offline – Waypoint</title>
+  {# Self-contained on purpose: shown with no connection, so nothing from a CDN. #}
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: #f8fafc; color: #0f172a; padding: 16px; box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .card {
+      max-width: 22rem; width: 100%; text-align: center; background: #fff;
+      border: 1px solid #e2e8f0; border-radius: 1rem; padding: 2rem 1.5rem;
+    }
+    img { width: 64px; height: 64px; border-radius: 14px; }
+    h1 { font-size: 1.25rem; margin: 1rem 0 0.5rem; }
+    p { color: #64748b; font-size: 0.875rem; line-height: 1.5; margin: 0 0 1.5rem; }
+    button {
+      background: #6366f1; color: #fff; border: 0; border-radius: 0.5rem;
+      padding: 0.625rem 1.25rem; font-size: 0.875rem; font-weight: 600; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img src="{% static 'icons/icon-192.png' %}" alt="">
+    <h1>You're offline</h1>
+    <p>Waypoint needs a connection to load your waypoints and maps. Check your
+       connection and try again.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </div>
+</body>
+</html>

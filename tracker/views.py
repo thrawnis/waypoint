@@ -2752,6 +2752,26 @@ def robots_txt(request):
     return HttpResponse("User-agent: *\nDisallow: /\n", content_type="text/plain")
 
 
+def service_worker(request):
+    """The PWA service worker. Must be served from the site root (not
+    /static/) so its scope covers every page, and must not be cached long, so
+    a deploy's new version is picked up on the next visit."""
+    from django.templatetags.static import static
+    resp = render(request, "pwa/sw.js", {
+        "version": settings.APP_VERSION,
+        "static_prefix": settings.STATIC_URL,
+        "icon_url": static("icons/icon-192.png"),
+    }, content_type="application/javascript")
+    resp["Cache-Control"] = "no-cache"
+    return resp
+
+
+def offline(request):
+    """Shown by the service worker when a page can't load for lack of a
+    connection. Public and user-agnostic, since it's cached on install."""
+    return render(request, "pwa/offline.html")
+
+
 # ── Admin dashboard ───────────────────────────────────────────────────────────
 
 @user_passes_test(is_admin)

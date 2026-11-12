@@ -37,6 +37,9 @@ _GATE_EXEMPT_NAMES = (
     "two_factor_verify", "two_factor_disable", "two_factor_settings",
     "passkey_register_options", "passkey_register_verify", "passkey_delete",
     "terms", "terms_accept", "terms_decline",
+    # The browser fetches these itself; a gate redirect would break the
+    # service worker's registration/install instead of showing a page.
+    "service_worker", "offline",
 )
 
 
