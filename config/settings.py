@@ -104,13 +104,18 @@ GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
 TERMS_VERSION = os.environ.get("TERMS_VERSION", "2026-01-05")
 
 # ── Email / verification ───────────────────────────────────────────────────────
-# Require users to confirm their email before using the app. Set to False to
-# disable (e.g. if no mail server is available).
-REQUIRE_EMAIL_VERIFICATION = os.environ.get("REQUIRE_EMAIL_VERIFICATION", "True").lower() == "true"
 # Default to the console backend (prints emails to the container logs) so the
 # app works out of the box; set EMAIL_HOST etc. in .env to send real mail.
 EMAIL_BACKEND = os.environ.get(
     "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
+)
+# Every account (new or existing) must confirm its email before using the app
+# whenever real mail can actually be delivered (SMTP backend) — that can't be
+# switched off. Without SMTP nobody could receive the link, so it's off unless
+# REQUIRE_EMAIL_VERIFICATION=True forces it (e.g. reading links from the logs).
+SMTP_ENABLED = EMAIL_BACKEND == "django.core.mail.backends.smtp.EmailBackend"
+REQUIRE_EMAIL_VERIFICATION = SMTP_ENABLED or (
+    os.environ.get("REQUIRE_EMAIL_VERIFICATION", "False").lower() == "true"
 )
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))

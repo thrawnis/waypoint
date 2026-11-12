@@ -698,7 +698,9 @@ def register_view(request):
             # Verification disabled — create the account directly.
             user = form.save()
             _make_admin_if_first(user)
-            EmailVerification.objects.get_or_create(user=user, defaults={"verified": True})
+            # Deliberately no verified EmailVerification here: the address was
+            # never confirmed, so if SMTP is enabled later this account must
+            # verify like every other one.
             # Terms were agreed via the registration checkbox.
             TermsAcceptance.objects.get_or_create(
                 user=user, version=settings.TERMS_VERSION,
@@ -830,20 +832,49 @@ def verify_email(request):
     if ev.verified:
         request.session["email_verified"] = True
         return redirect("location_list")
-    return render(request, "registration/verify_email.html", {"email": request.user.email})
+    # Existing accounts land here without ever having been sent a link (only
+    # new signups get one up front), so send the first one automatically.
+    sent = ev.last_sent_at is not None
+    if not sent and request.user.email:
+        sent = _send_verification_email(request, request.user)
+    return render(request, "registration/verify_email.html", {
+        "email": request.user.email,
+        "sent": sent,
+    })
+
+
+_EMAIL_RESEND_COOLDOWN_SECONDS = 60
 
 
 @require_POST
 @login_required
 def verify_email_resend(request):
+    ev = EmailVerification.objects.filter(user=request.user).first()
+    if ev and ev.last_sent_at and (
+        timezone.now() - ev.last_sent_at
+    ).total_seconds() < _EMAIL_RESEND_COOLDOWN_SECONDS:
+        messages.error(request, "A link was just sent — wait a minute before requesting another.")
+        return redirect("verify_email")
     # Allow the user to set/correct their email here if it's missing or wrong.
     new_email = (request.POST.get("email") or "").strip()
-    if new_email:
+    if new_email and new_email.lower() != (request.user.email or "").lower():
+        from django.core.exceptions import ValidationError
+        from django.core.validators import validate_email
+        try:
+            validate_email(new_email)
+        except ValidationError:
+            messages.error(request, "That doesn't look like a valid email address.")
+            return redirect("verify_email")
         if User.objects.filter(email__iexact=new_email).exclude(pk=request.user.pk).exists():
             messages.error(request, "That email is already in use by another account.")
             return redirect("verify_email")
         request.user.email = new_email
         request.user.save(update_fields=["email"])
+        # A new address is unconfirmed, even if the old one had been verified.
+        EmailVerification.objects.update_or_create(
+            user=request.user, defaults={"verified": False, "verified_at": None}
+        )
+        request.session.pop("email_verified", None)
     if _send_verification_email(request, request.user):
         messages.success(request, "Verification email sent to {}.".format(request.user.email))
     else:
