@@ -47,10 +47,22 @@ if [ "$BEFORE" = "$AFTER" ] && [ "$RUNNING_COMMIT" = "$COMMIT" ] \
    && [ "$FORCE" -eq 0 ] && [ "$PULL_BASE_IMAGES" -eq 0 ]; then
   echo "==> Already up to date (commit $COMMIT, no new commits on $BRANCH) — nothing to rebuild."
   echo "    (use --force to rebuild anyway)"
+  echo "##DEPLOY_STATUS:NO_CHANGE##"
   exit 0
 fi
 if [ "$BEFORE" = "$AFTER" ] && [ "$RUNNING_COMMIT" != "$COMMIT" ]; then
   echo "==> No new commits, but the running image is at '$RUNNING_COMMIT' not '$COMMIT' — rebuilding anyway."
+fi
+
+# Machine-readable marker for the deploy dashboard: UPDATED when the code
+# about to be deployed differs from what the image was built from (new
+# commits, or a stale image). A --force/--pull-base-images rebuild of the
+# same commit still counts as NO_CHANGE. Printed before building, so it
+# reflects what was detected, not whether the build then succeeds.
+if [ "$BEFORE" != "$AFTER" ] || [ "$RUNNING_COMMIT" != "$COMMIT" ]; then
+  echo "##DEPLOY_STATUS:UPDATED##"
+else
+  echo "##DEPLOY_STATUS:NO_CHANGE##"
 fi
 
 # Ensure host-side data subdirs exist before Docker mounts them
