@@ -34,7 +34,7 @@ from .models import (
     FriendGroup, FriendGroupJoinRequest,
     FriendGroupMembership, GlutenFreeVote, Item, ItemReview,
     Location, LocationReview, OsmSearchCache, PendingRegistration, Photo,
-    TermsAcceptance, TOTPDevice, WebAuthnCredential,
+    PrivateNote, TermsAcceptance, TOTPDevice, WebAuthnCredential,
 )
 from .permissions import SUPERUSER_GROUP_NAME, can_edit_location, is_admin, is_superuser_role, user_has_mfa
 from .ratelimit import get_client_ip, ratelimit
@@ -92,7 +92,6 @@ def _location_diff(old, new_data):
         "gluten_free": "Gluten-free",
         "dietary_notes": "Dietary notes",
         "public_notes": "Public notes",
-        "private_notes": "Private notes",
     }
     parts = []
     for field, label in field_labels.items():
@@ -1014,11 +1013,12 @@ def _group_rating_summary_text(breakdown):
 
 # ── Locations ─────────────────────────────────────────────────────────────────
 
-def _has_activity(loc, user):
+def _has_activity(loc):
     """Whether anyone has recorded anything about this waypoint beyond saving
     it: a review or rating, a dish, a photo, GF status, or notes. Private notes
-    only count for the waypoint's creator, the only one who can see them.
-    Expects loc annotated with user_review_count and photos/items prefetched."""
+    only count for their own author, the only one who can see them. Expects
+    loc annotated with user_review_count and has_my_private_note, and
+    photos/items prefetched."""
     return bool(
         loc.user_review_count
         or loc.overall_rating is not None
@@ -1027,7 +1027,7 @@ def _has_activity(loc, user):
         or loc.gluten_free
         or loc.public_notes.strip()
         or loc.dietary_notes.strip()
-        or (loc.private_notes.strip() and loc.created_by_id == user.pk)
+        or loc.has_my_private_note
     )
 
 
@@ -1042,6 +1042,9 @@ def location_list(request):
             user_avg_rating=Avg("reviews__rating"),
             user_review_count=Count("reviews", distinct=True),
             mine=Exists(my_reviews),
+            has_my_private_note=Exists(
+                PrivateNote.objects.filter(location=OuterRef("pk"), user=request.user)
+            ),
         )
         .all()
     )
@@ -1056,7 +1059,7 @@ def location_list(request):
     for loc in loc_list:
         rating = loc.user_avg_rating if loc.user_avg_rating is not None else loc.overall_rating
         first_photo = next(iter(loc.photos.all()), None)
-        loc.has_activity = _has_activity(loc, request.user)
+        loc.has_activity = _has_activity(loc)
         waypoints.append({
             "id": loc.pk,
             "name": loc.name,
@@ -1130,6 +1133,7 @@ def location_detail(request, pk):
 
     return render(request, "tracker/location_detail.html", {
         "location": location,
+        "my_private_note": _my_private_note_text(request.user, location),
         "item_form": ItemForm(),
         "photo_form": PhotoForm(location=location),
         "my_review": my_review,
@@ -1151,6 +1155,32 @@ def location_detail(request, pk):
     })
 
 
+def _my_private_note_text(user, location):
+    note = PrivateNote.objects.filter(user=user, location=location).first() if location else None
+    return note.text if note else ""
+
+
+def _save_private_note(user, location, text):
+    """Set (or, when blank, delete) the user's own note on a place. Deliberately
+    never audit-logged: the audit log is visible to admins."""
+    text = (text or "").strip()
+    if text:
+        PrivateNote.objects.update_or_create(user=user, location=location, defaults={"text": text})
+    else:
+        PrivateNote.objects.filter(user=user, location=location).delete()
+
+
+@login_required
+@require_POST
+def private_note_save(request, pk):
+    location = get_object_or_404(Location, pk=pk)
+    _save_private_note(request.user, location, (request.POST.get("text") or "")[:5000])
+    return render(request, "tracker/partials/private_note.html", {
+        "location": location,
+        "my_private_note": _my_private_note_text(request.user, location),
+    })
+
+
 @login_required
 def location_create(request):
     prefill = {f: request.GET[f] for f in [
@@ -1163,10 +1193,14 @@ def location_create(request):
         location = form.save(commit=False)
         location.created_by = request.user
         location.save()
+        _save_private_note(request.user, location, request.POST.get("my_private_note"))
         _log(request, AuditLog.ACTION_CREATE, location, 'Created location "{}"'.format(location.name))
         messages.success(request, "Waypoint added.")
         return redirect("location_detail", pk=location.pk)
-    return render(request, "tracker/location_form.html", {"form": form, "action": "Add"})
+    return render(request, "tracker/location_form.html", {
+        "form": form, "action": "Add",
+        "my_private_note": request.POST.get("my_private_note", ""),
+    })
 
 
 @login_required
@@ -1214,6 +1248,7 @@ def location_edit(request, pk):
         if form.is_valid():
             diff = _location_diff(old, form.cleaned_data)
             form.save()
+            _save_private_note(request.user, location, request.POST.get("my_private_note"))
             if diff != "No changes detected":   # only log real changes
                 _log(request, AuditLog.ACTION_UPDATE, location, diff)
             messages.success(request, "Waypoint updated.")
@@ -1226,6 +1261,8 @@ def location_edit(request, pk):
         "location": location,
         # True when a superuser/admin is editing a normally-locked Google POI
         "admin_override": unlock and bool(location.google_place_id),
+        "my_private_note": (request.POST.get("my_private_note", "") if request.method == "POST"
+                            else _my_private_note_text(request.user, location)),
     })
 
 

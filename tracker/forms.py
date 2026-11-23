@@ -142,7 +142,6 @@ class LocationForm(forms.ModelForm):
             "gluten_free",
             "dietary_notes",
             "public_notes",
-            "private_notes",
         ]
         widgets = {
             "name": forms.TextInput(attrs={"placeholder": "Location name"}),
@@ -156,9 +155,6 @@ class LocationForm(forms.ModelForm):
                 attrs={"rows": 3, "placeholder": "e.g. Dedicated GF fryer, staff trained on cross-contamination, ask for GF menu"}
             ),
             "public_notes": forms.Textarea(attrs={"rows": 4, "placeholder": "Visible to everyone"}),
-            "private_notes": forms.Textarea(
-                attrs={"rows": 4, "placeholder": "Only visible when logged in"}
-            ),
         }
 
     def __init__(self, *args, unlock_google_fields=False, **kwargs):

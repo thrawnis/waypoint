@@ -177,9 +177,8 @@
           {{ form.public_notes }}
         </div>
 
-        {% if not location or user == location.created_by %}
         <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">
+          <label for="my-private-note" class="block text-sm font-medium text-slate-700 mb-1">
             <span class="inline-flex items-center gap-1.5">
               <svg class="w-3.5 h-3.5 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd"
@@ -189,10 +188,11 @@
               Private Notes
             </span>
           </label>
-          <p class="text-xs text-slate-400 mb-1.5">Only visible to you.</p>
-          {{ form.private_notes }}
+          <p class="text-xs text-slate-400 mb-1.5">Only you can ever see this — not other users, and not admins.</p>
+          <textarea id="my-private-note" name="my_private_note" rows="4" placeholder="Only visible to you"
+                    class="block w-full text-sm border border-slate-200 rounded-lg px-3 py-2
+                           focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand">{{ my_private_note }}</textarea>
         </div>
-        {% endif %}
       </fieldset>
 
       <!-- Submit -->

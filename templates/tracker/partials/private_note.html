@@ -1,0 +1,46 @@
+{# The signed-in user's own note on this place — only ever rendered for them. #}
+<div id="private-note" x-data="{ editing: false }"
+     class="bg-amber-50 border border-amber-200 rounded-xl shadow-sm p-5">
+  <div class="flex items-center justify-between gap-2 mb-2">
+    <div class="flex items-center gap-2">
+      <svg class="w-4 h-4 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+        <path fill-rule="evenodd"
+              d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
+              clip-rule="evenodd"/>
+      </svg>
+      <h2 class="text-sm font-semibold text-amber-700 uppercase tracking-wide">My private note</h2>
+    </div>
+    <button type="button" x-show="!editing" @click="editing = true; $nextTick(() => $refs.text.focus())"
+            class="text-xs font-semibold text-amber-700 hover:text-amber-900">
+      {% if my_private_note %}Edit{% else %}+ Add{% endif %}
+    </button>
+  </div>
+
+  <div x-show="!editing">
+    {% if my_private_note %}
+    <p class="text-amber-900 whitespace-pre-line leading-relaxed">{{ my_private_note }}</p>
+    {% else %}
+    <p class="text-sm text-amber-800/70">Jot down anything about this place for yourself.</p>
+    {% endif %}
+    <p class="text-[11px] text-amber-700/70 mt-2">Only you can see this — not other users, and not admins.</p>
+  </div>
+
+  <form x-show="editing" x-cloak
+        hx-post="{% url 'private_note_save' location.pk %}"
+        hx-target="#private-note" hx-swap="outerHTML" class="space-y-2">
+    {% csrf_token %}
+    <textarea name="text" rows="4" x-ref="text" maxlength="5000" placeholder="Only visible to you"
+              class="block w-full text-sm border border-amber-200 rounded-lg px-3 py-2 bg-white
+                     focus:outline-none focus:ring-2 focus:ring-amber-300/50 focus:border-amber-400">{{ my_private_note }}</textarea>
+    <div class="flex items-center gap-3">
+      <button type="submit"
+              class="bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-1.5 rounded-lg">
+        Save
+      </button>
+      <button type="button" @click="editing = false" class="text-sm text-amber-700 hover:text-amber-900">Cancel</button>
+      {% if my_private_note %}
+      <span class="ml-auto text-[11px] text-amber-700/70">Clear the text and save to delete it.</span>
+      {% endif %}
+    </div>
+  </form>
+</div>

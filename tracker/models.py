@@ -29,7 +29,6 @@ class Location(models.Model):
         help_text="Google Place ID — enables open-now refresh on the detail page",
     )
     public_notes = models.TextField(blank=True)
-    private_notes = models.TextField(blank=True)
 
     GF_UNKNOWN   = ""
     GF_DEDICATED = "dedicated"
@@ -181,6 +180,23 @@ class LocationReview(models.Model):
 
     def __str__(self):
         return f"{self.user.username} → {self.location.name}: {self.rating}"
+
+
+class PrivateNote(models.Model):
+    """One user's own note about a place. Shown only to that user — never to
+    other users, superusers or admins, and never recorded in the audit log or
+    registered in the Django admin."""
+
+    location = models.ForeignKey(Location, on_delete=models.CASCADE, related_name="user_private_notes")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="private_notes")
+    text = models.TextField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("location", "user")]
+
+    def __str__(self):
+        return f"Private note #{self.pk}"
 
 
 class GlutenFreeVote(models.Model):

@@ -43,6 +43,7 @@ urlpatterns = [
     path("locations/geojson/", views.locations_geojson, name="locations_geojson"),
     path("locations/<int:pk>/", views.location_detail, name="location_detail"),
     path("locations/<int:pk>/edit/", views.location_edit, name="location_edit"),
+    path("locations/<int:pk>/private-note/", views.private_note_save, name="private_note_save"),
     path("locations/<int:pk>/delete/", views.location_delete, name="location_delete"),
     path("locations/<int:pk>/chain-search/", views.location_chain_search, name="location_chain_search"),
     path("locations/<int:pk>/link/<int:target_pk>/", views.location_link, name="location_link"),
