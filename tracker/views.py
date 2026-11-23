@@ -1143,6 +1143,7 @@ def location_detail(request, pk):
         "items": items,
         "item_behalf_targets": _item_behalf_targets(request, location, items),
         "linked_targets": _location_linked_targets(request, location),
+        "linked_ids": linked_account_ids(request.user),
         "my_reviews": my_item_reviews,
         # Auto-open the location review form when arriving via "Rate Me!"
         "open_review": open_review,
@@ -1540,6 +1541,7 @@ def _render_items_section(
     item_form=None, show_form=False,
     review_item_pk=None, review_form=None,
     edit_item_pk=None, edit_form=None,
+    behalf_edit=None,
 ):
     # Determine the logged-in user's existing reviews (item_pk → review)
     my_reviews = {}
@@ -1561,6 +1563,8 @@ def _render_items_section(
         "review_form": review_form or ItemReviewForm(),
         "my_reviews": my_reviews,
         "item_behalf_targets": item_behalf_targets,
+        "linked_ids": linked_account_ids(request.user) if request.user.is_authenticated else set(),
+        "behalf_edit": behalf_edit,
         "edit_item_pk": edit_item_pk,
         "edit_form": edit_form,
         # Reviewing an item/dish requires having rated the waypoint overall first.
@@ -1668,6 +1672,9 @@ def item_review_upsert(request, pk, item_pk):
             review = form.save(commit=False)
             review.item = item
             review.user = request.user
+            # Rewritten by its owner, so no longer "on your behalf".
+            review.submitted_by = None
+            review.subject_seen = True
             review.save()
             action = AuditLog.ACTION_UPDATE if existing else AuditLog.ACTION_CREATE
             _log(request, action, review,
@@ -1708,38 +1715,41 @@ def item_review_delete(request, pk, item_pk):
 
 
 @login_required
-@require_POST
 def item_review_on_behalf(request, pk, item_pk):
-    """Add a dish/item review for a linked account (add-only). Must not already
-    have a review for this item — no waypoint review is required first."""
+    """Add or edit a linked account's dish/item review (GET ?subject=<id> opens
+    the edit form for their existing one; POST saves). No waypoint review is
+    required first. Their private notes are never shown or changed."""
     location = get_object_or_404(Location, pk=pk)
     item = get_object_or_404(_item_queryset_for_location(location), pk=item_pk)
-    try:
-        subject_id = int(request.POST.get("subject") or 0)
-    except (TypeError, ValueError):
-        subject_id = 0
-    if subject_id not in linked_account_ids(request.user):
-        return HttpResponseForbidden("You can only add reviews for your linked accounts.")
-    subject = get_object_or_404(User, pk=subject_id)
-    if ItemReview.objects.filter(item=item, user=subject).exists():
-        messages.error(request,
-                       "{} already reviewed “{}” — only they can change it.".format(subject.username, item.name))
-        return _render_items_section(request, location)
-    form = ItemReviewForm(request.POST)
+    subject = _behalf_subject(request)
+    if subject is None:
+        return HttpResponseForbidden("You can only add or edit reviews for your linked accounts.")
+    existing = ItemReview.objects.filter(item=item, user=subject).first()
+
+    if request.method != "POST":
+        if request.GET.get("cancel") or existing is None:
+            return _render_items_section(request, location)
+        return _render_items_section(request, location, behalf_edit=existing)
+
+    form = ItemReviewForm({
+        "rating": request.POST.get("rating"),
+        "notes": request.POST.get("notes", ""),
+        # Keep whatever they wrote privately; it isn't part of this form.
+        "private_notes": existing.private_notes if existing else "",
+    }, instance=existing)
     if not form.is_valid():
         messages.error(request, "Please choose a rating for {}.".format(subject.username))
-        return _render_items_section(request, location)
+        return _render_items_section(request, location, behalf_edit=existing)
     review = form.save(commit=False)
     review.item = item
     review.user = subject
     review.submitted_by = request.user
     review.subject_seen = False
-    review.private_notes = ""      # never write "private" notes on someone else's behalf
     review.save()
-    _log(request, AuditLog.ACTION_CREATE, review,
-         'Added review for "{}" in "{}" on behalf of {}: {}/5'.format(
-             item.name, location.name, subject.username, review.rating))
-    messages.success(request, "Dish review added for {}.".format(subject.username))
+    _log(request, AuditLog.ACTION_UPDATE if existing else AuditLog.ACTION_CREATE, review,
+         '{} review for "{}" in "{}" on behalf of {}: {}/5'.format(
+             "Updated" if existing else "Added", item.name, location.name, subject.username, review.rating))
+    messages.success(request, "Dish review {} for {}.".format("updated" if existing else "added", subject.username))
     return _render_items_section(request, location)
 
 
@@ -2014,7 +2024,7 @@ def _location_linked_targets(request, location):
     return list(User.objects.filter(pk__in=[i for i in fam_ids if i not in reviewed]).order_by("username"))
 
 
-def _render_location_reviews(request, location, review_form=None, show_form=False):
+def _render_location_reviews(request, location, review_form=None, show_form=False, behalf_edit=None):
     my_review = location.reviews.filter(user=request.user).first() \
         if request.user.is_authenticated else None
     return render(request, "tracker/partials/location_reviews.html", {
@@ -2023,6 +2033,8 @@ def _render_location_reviews(request, location, review_form=None, show_form=Fals
         "review_form": review_form or LocationReviewForm(instance=my_review),
         "show_form": show_form,
         "linked_targets": _location_linked_targets(request, location),
+        "linked_ids": linked_account_ids(request.user) if request.user.is_authenticated else set(),
+        "behalf_edit": behalf_edit,
         # This view is only ever hit via HTMX, so it's safe to always include
         # the out-of-band header-badge swap (see template comment).
         "oob": True,
@@ -2041,6 +2053,9 @@ def location_review_upsert(request, pk):
             review = form.save(commit=False)
             review.location = location
             review.user = request.user
+            # Rewritten by its owner, so no longer "on your behalf".
+            review.submitted_by = None
+            review.subject_seen = True
             review.save()
             action = AuditLog.ACTION_UPDATE if existing else AuditLog.ACTION_CREATE
             _log(request, action, review,
@@ -2070,36 +2085,49 @@ def location_review_delete(request, pk):
     return _render_location_reviews(request, location)
 
 
-@login_required
-@require_POST
-def location_review_on_behalf(request, pk):
-    """Add a waypoint review for a linked account. Add-only: if the subject
-    already has a review here it's left untouched (you can't edit theirs)."""
-    location = get_object_or_404(Location, pk=pk)
+def _behalf_subject(request):
+    """The linked account named by ?subject= / POST subject, or None if it
+    isn't one of the current user's direct links."""
+    raw = request.POST.get("subject") if request.method == "POST" else request.GET.get("subject")
     try:
-        subject_id = int(request.POST.get("subject") or 0)
+        subject_id = int(raw or 0)
     except (TypeError, ValueError):
-        subject_id = 0
+        return None
     if subject_id not in linked_account_ids(request.user):
-        return HttpResponseForbidden("You can only add reviews for your linked accounts.")
-    subject = get_object_or_404(User, pk=subject_id)
-    if LocationReview.objects.filter(location=location, user=subject).exists():
-        messages.error(request,
-                       "{} already has a review here — only they can change it.".format(subject.username))
-        return _render_location_reviews(request, location)
-    form = LocationReviewForm(request.POST)
+        return None
+    return User.objects.filter(pk=subject_id).first()
+
+
+@login_required
+def location_review_on_behalf(request, pk):
+    """Add or edit a linked account's waypoint review. GET ?subject=<id> opens
+    the edit form for their existing review; POST saves it. You never need a
+    review of your own here first. Deleting stays with the review's owner."""
+    location = get_object_or_404(Location, pk=pk)
+    subject = _behalf_subject(request)
+    if subject is None:
+        return HttpResponseForbidden("You can only add or edit reviews for your linked accounts.")
+    existing = LocationReview.objects.filter(location=location, user=subject).first()
+
+    if request.method != "POST":
+        if request.GET.get("cancel") or existing is None:
+            return _render_location_reviews(request, location)
+        return _render_location_reviews(request, location, behalf_edit=existing)
+
+    form = LocationReviewForm(request.POST, instance=existing)
     if not form.is_valid():
         messages.error(request, "Please choose a rating for {}.".format(subject.username))
-        return _render_location_reviews(request, location)
+        return _render_location_reviews(request, location, behalf_edit=existing)
     review = form.save(commit=False)
     review.location = location
     review.user = subject
     review.submitted_by = request.user
     review.subject_seen = False       # surfaced to the subject on their next login
     review.save()
-    _log(request, AuditLog.ACTION_CREATE, review,
-         'Added review for "{}" on behalf of {}: {}/5'.format(location.name, subject.username, review.rating))
-    messages.success(request, "Review added for {}.".format(subject.username))
+    _log(request, AuditLog.ACTION_UPDATE if existing else AuditLog.ACTION_CREATE, review,
+         '{} review for "{}" on behalf of {}: {}/5'.format(
+             "Updated" if existing else "Added", location.name, subject.username, review.rating))
+    messages.success(request, "Review {} for {}.".format("updated" if existing else "added", subject.username))
     return _render_location_reviews(request, location)
 
 
