@@ -116,7 +116,7 @@
         </form>
         {% endif %}
         <form method="post" action="{% url 'collection_delete' coll.pk %}"
-              onsubmit="return confirmWithReason('Delete collection “{{ coll.name|escapejs }}”? Waypoints themselves are kept.', this)">
+              data-reason-prompt="Delete collection “{{ coll.name }}”? Waypoints themselves are kept.">
           {% csrf_token %}
           <button type="submit"
                   class="text-xs text-red-400 hover:text-red-600 border border-red-200 hover:border-red-400

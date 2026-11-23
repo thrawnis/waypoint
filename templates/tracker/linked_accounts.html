@@ -7,9 +7,10 @@
   <div>
     <h1 class="text-2xl font-bold text-slate-900">Linked Accounts</h1>
     <p class="text-sm text-slate-500 mt-1">
-      Linked accounts are one-to-one connections. Anyone you're linked with can log waypoint
-      and dish reviews <strong>on your behalf</strong> (and you on theirs) — but only the person a
-      review belongs to can edit or delete it. Connections are direct: being connected to two
+      Linked accounts are one-to-one connections. Anyone you're linked with can add and edit
+      waypoint and dish reviews <strong>on your behalf</strong> (and you on theirs), and you're told
+      when they do — but only the person a review belongs to can delete it. Connections are
+      direct: being connected to two
       people never connects <em>them</em> to each other.
     </p>
   </div>
@@ -30,7 +31,7 @@
         Copy
       </button>
       <form method="post" action="{% url 'linked_account_invite_regenerate' %}"
-            onsubmit="return confirm('Regenerate your invite link? The old link will stop working.')">
+            data-confirm="Regenerate your invite link?" data-confirm-detail="The old link will stop working." data-confirm-ok="Regenerate">
         {% csrf_token %}
         <button type="submit"
                 class="text-sm font-semibold text-slate-500 hover:text-slate-700 border border-slate-200
@@ -52,7 +53,7 @@
       <li class="flex items-center justify-between gap-2 py-2">
         <span class="text-sm font-medium text-slate-700">{{ m.username }}</span>
         <form method="post" action="{% url 'linked_account_disconnect' m.pk %}"
-              onsubmit="return confirm('Remove {{ m.username|escapejs }} from your linked accounts? Reviews already added stay put.')">
+              data-confirm="Remove {{ m.username }} from your linked accounts?" data-confirm-detail="Reviews already added stay put." data-confirm-ok="Remove" data-confirm-danger>
           {% csrf_token %}
           <button type="submit"
                   class="text-xs font-semibold text-red-400 hover:text-red-600 border border-red-200

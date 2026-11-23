@@ -94,7 +94,7 @@
               <div class="flex flex-col items-end gap-1">
                 {% if u.pk != request.user.pk %}
                 <form method="post" action="{% url 'admin_user_toggle_admin' u.pk %}"
-                      onsubmit="return confirm('{% if u.is_staff %}Remove admin status from{% else %}Make{% endif %} {{ u.username|escapejs }} {% if not u.is_staff %}an admin{% endif %}?')">
+                      data-confirm="{% if u.is_staff %}Remove admin status from {{ u.username }}?{% else %}Make {{ u.username }} an admin?{% endif %}" data-confirm-ok="{% if u.is_staff %}Remove admin{% else %}Make admin{% endif %}"{% if u.is_staff %} data-confirm-danger{% endif %}>
                   {% csrf_token %}
                   {% if u.is_staff %}
                   <button type="submit"
@@ -111,7 +111,7 @@
                   {% endif %}
                 </form>
                 <form method="post" action="{% url 'admin_user_toggle_superuser' u.pk %}"
-                      onsubmit="return confirm('{% if u.is_superuser_role %}Remove superuser role from{% else %}Make{% endif %} {{ u.username|escapejs }} {% if not u.is_superuser_role %}a superuser{% endif %}?')">
+                      data-confirm="{% if u.is_superuser_role %}Remove the superuser role from {{ u.username }}?{% else %}Make {{ u.username }} a superuser?{% endif %}" data-confirm-ok="{% if u.is_superuser_role %}Remove role{% else %}Make superuser{% endif %}"{% if u.is_superuser_role %} data-confirm-danger{% endif %}>
                   {% csrf_token %}
                   {% if u.is_superuser_role %}
                   <button type="submit" {% if u.is_staff %}disabled title="Admins already have every superuser ability"{% endif %}

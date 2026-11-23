@@ -46,6 +46,37 @@
     .text-brand { color: #6366f1; }
     .border-brand { border-color: #6366f1; }
 
+    /* Themed replacement for the browser's confirm()/prompt() — see
+       wpDialog() below. Plain CSS so it never depends on Tailwind's JIT. */
+    .wp-dialog {
+      width: calc(100% - 32px); max-width: 24rem; padding: 0; border: 0;
+      border-radius: 1rem; background: #fff; color: #0f172a;
+      box-shadow: 0 20px 50px -12px rgba(15, 23, 42, .35);
+    }
+    .wp-dialog::backdrop { background: rgba(15, 23, 42, .45); }
+    .wp-dialog form { padding: 1.25rem; }
+    .wp-dialog h2 { font-size: 1rem; font-weight: 700; line-height: 1.4; margin: 0; }
+    .wp-dialog .wp-dialog-message { font-size: .875rem; color: #475569; line-height: 1.5; margin: .5rem 0 0; white-space: pre-line; }
+    .wp-dialog label { display: block; font-size: .75rem; font-weight: 600; color: #475569; margin: 1rem 0 .25rem; }
+    .wp-dialog textarea {
+      display: block; width: 100%; box-sizing: border-box; resize: vertical;
+      border: 1px solid #e2e8f0; border-radius: .5rem; padding: .5rem .75rem; font: inherit; font-size: .875rem;
+    }
+    .wp-dialog textarea:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px #e0e7ff; }
+    .wp-dialog .wp-dialog-error { font-size: .75rem; color: #ef4444; margin: .375rem 0 0; }
+    .wp-dialog .wp-dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1.25rem; }
+    .wp-dialog button {
+      font: inherit; font-size: .875rem; font-weight: 600; border-radius: .5rem;
+      padding: .625rem 1rem; cursor: pointer; border: 1px solid transparent;
+    }
+    .wp-dialog .wp-dialog-cancel { background: #fff; color: #475569; border-color: #e2e8f0; }
+    .wp-dialog .wp-dialog-cancel:hover { border-color: #cbd5e1; color: #0f172a; }
+    .wp-dialog .wp-dialog-ok { background: #6366f1; color: #fff; }
+    .wp-dialog .wp-dialog-ok:hover { background: #4f46e5; }
+    .wp-dialog .wp-dialog-ok.danger { background: #ef4444; }
+    .wp-dialog .wp-dialog-ok.danger:hover { background: #dc2626; }
+    @media (max-width: 767px) { .wp-dialog textarea { font-size: 16px; } }
+
     /* Belt-and-suspenders alongside the viewport meta tag's maximum-scale/
        user-scalable=no above: iOS Safari auto-zooms on focus when a text
        input's font-size is under 16px — most inputs here use Tailwind's
@@ -303,36 +334,130 @@
     &mdash; <a href="{% url 'terms' %}" class="hover:text-brand">Terms</a>
   </footer>
 
+  <!-- Themed confirm/prompt dialog, driven by wpDialog() below -->
+  <dialog id="wp-dialog" class="wp-dialog" aria-labelledby="wp-dialog-title">
+    <form method="dialog">
+      <h2 id="wp-dialog-title"></h2>
+      <p id="wp-dialog-message" class="wp-dialog-message"></p>
+      <div id="wp-dialog-input-wrap" hidden>
+        <label id="wp-dialog-input-label" for="wp-dialog-input"></label>
+        <textarea id="wp-dialog-input" rows="2"></textarea>
+        <p id="wp-dialog-error" class="wp-dialog-error" hidden>Please enter a reason.</p>
+      </div>
+      <div class="wp-dialog-actions">
+        <button type="button" id="wp-dialog-cancel" class="wp-dialog-cancel">Cancel</button>
+        <button type="submit" id="wp-dialog-ok" class="wp-dialog-ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- HTMX CSRF setup -->
   <script>
     document.body.addEventListener("htmx:configRequest", (e) => {
       e.detail.headers["X-CSRFToken"] = "{{ csrf_token }}";
     });
 
-    // ── Deletions require a reason (recorded in the audit log) ─────────
-    // Plain <form onsubmit="return confirmWithReason('...', this)">: prompts
-    // for a reason, stuffs it into a hidden "reason" input, and only lets
-    // the (real) submit through once one is given.
-    window.confirmWithReason = function (message, formEl) {
-      const reason = window.prompt(
-        (message || 'Please confirm this action') +
-        '\n\nPlease provide a reason (required — recorded in the audit log):'
-      );
-      if (reason === null || !reason.trim()) return false;
-      let hidden = formEl.querySelector('input[name="reason"]');
-      if (!hidden) {
-        hidden = document.createElement('input');
-        hidden.type = 'hidden';
-        hidden.name = 'reason';
-        formEl.appendChild(hidden);
+    // ── Themed dialogs (instead of the browser's confirm()/prompt()) ────
+    // wpDialog({title, message, confirmText, cancelText, danger, input})
+    // resolves to true (confirmed), the trimmed input text (when `input` is
+    // given), or null (cancelled / Esc / backdrop click).
+    window.wpDialog = function (opts) {
+      const o = Object.assign({ title: '', message: '', confirmText: 'OK', cancelText: 'Cancel',
+                                danger: false, input: null }, opts || {});
+      const dlg = document.getElementById('wp-dialog');
+      if (!dlg || typeof dlg.showModal !== 'function') {   // very old browsers
+        if (o.input) {
+          const v = window.prompt([o.title, o.message].filter(Boolean).join('\n\n'));
+          return Promise.resolve(v && v.trim() ? v.trim() : null);
+        }
+        return Promise.resolve(window.confirm([o.title, o.message].filter(Boolean).join('\n\n')) || null);
       }
-      hidden.value = reason.trim();
-      return true;
+      const $ = (id) => document.getElementById(id);
+      $('wp-dialog-title').textContent = o.title;
+      $('wp-dialog-message').textContent = o.message;
+      $('wp-dialog-message').hidden = !o.message;
+      const ok = $('wp-dialog-ok'), cancel = $('wp-dialog-cancel');
+      ok.textContent = o.confirmText;
+      ok.classList.toggle('danger', !!o.danger);
+      cancel.textContent = o.cancelText;
+      const wrap = $('wp-dialog-input-wrap'), field = $('wp-dialog-input'), err = $('wp-dialog-error');
+      wrap.hidden = !o.input;
+      err.hidden = true;
+      field.value = '';
+      if (o.input) {
+        $('wp-dialog-input-label').textContent = o.input.label || '';
+        field.placeholder = o.input.placeholder || '';
+      }
+      return new Promise((resolve) => {
+        const finish = (val) => {
+          dlg.onsubmit = cancel.onclick = dlg.oncancel = dlg.onclick = null;
+          if (dlg.open) dlg.close();
+          resolve(val);
+        };
+        dlg.onsubmit = (e) => {
+          e.preventDefault();
+          if (!o.input) return finish(true);
+          const v = field.value.trim();
+          if (o.input.required && !v) { err.hidden = false; field.focus(); return; }
+          finish(v);
+        };
+        cancel.onclick = () => finish(null);
+        dlg.oncancel = (e) => { e.preventDefault(); finish(null); };       // Esc
+        dlg.onclick = (e) => { if (e.target === dlg) finish(null); };      // backdrop
+        dlg.showModal();
+        (o.input ? field : ok).focus();
+      });
     };
 
-    // HTMX-triggered deletes: put the confirmation message in
-    // data-reason-prompt instead of hx-confirm. htmx's own confirm dialog is
-    // replaced by our prompt(), and the answer is sent along as "reason".
+    // Deletions require a reason, recorded in the audit log.
+    window.wpAskReason = function (message) {
+      return window.wpDialog({
+        title: message || 'Please confirm',
+        message: 'A reason is required and is recorded in the audit log.',
+        confirmText: 'Delete', danger: true,
+        input: { label: 'Reason', placeholder: 'e.g. duplicate, posted by mistake', required: true },
+      });
+    };
+
+    // Plain (non-HTMX) forms opt in with attributes instead of inline JS:
+    //   data-confirm="Title?"  [data-confirm-detail] [data-confirm-ok] [data-confirm-danger]
+    //   data-reason-prompt="Delete …?"  → asks for a reason, sent as "reason"
+    document.addEventListener('submit', async (e) => {
+      const form = e.target;
+      if (!(form instanceof HTMLFormElement)) return;
+      const isHtmx = form.hasAttribute('hx-post') || form.hasAttribute('hx-get');
+      const ask = form.dataset.confirm;
+      const reasonMsg = !isHtmx && form.dataset.reasonPrompt;
+      if (!ask && !reasonMsg) return;
+      if (form.dataset.wpConfirmed === '1') { delete form.dataset.wpConfirmed; return; }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const submitter = e.submitter;
+      let answer;
+      if (reasonMsg) {
+        answer = await window.wpAskReason(reasonMsg);
+        if (answer === null) return;
+        let hidden = form.querySelector('input[name="reason"]');
+        if (!hidden) {
+          hidden = document.createElement('input');
+          hidden.type = 'hidden';
+          hidden.name = 'reason';
+          form.appendChild(hidden);
+        }
+        hidden.value = answer;
+      } else {
+        answer = await window.wpDialog({
+          title: ask, message: form.dataset.confirmDetail || '',
+          confirmText: form.dataset.confirmOk || 'OK',
+          danger: form.hasAttribute('data-confirm-danger'),
+        });
+        if (answer === null) return;
+      }
+      form.dataset.wpConfirmed = '1';
+      if (form.requestSubmit) form.requestSubmit(submitter && submitter.form === form ? submitter : undefined);
+      else form.submit();
+    }, true);
+
     // Review forms (data-rating-optional): saving written text with no stars
     // is allowed, but only after the user confirms it's deliberate. The
     // server refuses an unrated review unless no_rating_ok=1 comes with it.
@@ -349,27 +474,35 @@
       const hasText = !!(notes && notes.value.trim());
       if (!unrated || !hasText) return;   // nothing to confirm
       e.preventDefault();
-      if (!window.confirm('Save this review without a star rating?\n\nThe written review will be saved, but it won\'t count toward the average rating.')) return;
-      if (!flag) {
-        flag = document.createElement('input');
-        flag.type = 'hidden';
-        flag.name = 'no_rating_ok';
-        form.appendChild(flag);
-      }
-      flag.value = '1';
-      e.detail.issueRequest(true);
+      window.wpDialog({
+        title: 'Save without a star rating?',
+        message: "Your written review will be saved, but it won't count toward the average rating.",
+        confirmText: 'Save without stars',
+      }).then((ok) => {
+        if (!ok) return;
+        if (!flag) {
+          flag = document.createElement('input');
+          flag.type = 'hidden';
+          flag.name = 'no_rating_ok';
+          form.appendChild(flag);
+        }
+        flag.value = '1';
+        e.detail.issueRequest(true);
+      });
     });
+
+    // HTMX-triggered deletes put their message in data-reason-prompt (not
+    // hx-confirm); the reason entered is sent along as "reason".
     document.body.addEventListener('htmx:confirm', (e) => {
       const el = e.detail.elt;
       const msg = el.getAttribute('data-reason-prompt');
       if (!msg) return;   // not one of ours — let htmx's normal hx-confirm run
       e.preventDefault();
-      const reason = window.prompt(
-        msg + '\n\nPlease provide a reason (required — recorded in the audit log):'
-      );
-      if (reason === null || !reason.trim()) return;   // cancelled/empty → no request
-      el.setAttribute('hx-vals', JSON.stringify({ reason: reason.trim() }));
-      e.detail.issueRequest(true);
+      window.wpAskReason(msg).then((reason) => {
+        if (reason === null) return;
+        el.setAttribute('hx-vals', JSON.stringify({ reason: reason }));
+        e.detail.issueRequest(true);
+      });
     });
     // PWA: the service worker lives at the site root so it covers every page.
     if ('serviceWorker' in navigator) {

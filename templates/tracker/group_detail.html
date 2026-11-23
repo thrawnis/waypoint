@@ -15,7 +15,7 @@
       <p class="text-sm text-slate-500 mt-1">{{ members.count }} member{{ members.count|pluralize }}</p>
     </div>
     <form method="post" action="{% url 'group_leave' group.pk %}"
-          onsubmit="return confirm('Leave “{{ group.name|escapejs }}”?')">
+          data-confirm="Leave “{{ group.name }}”?" data-confirm-ok="Leave group" data-confirm-danger>
       {% csrf_token %}
       <button type="submit"
               class="text-xs font-semibold text-red-400 hover:text-red-600 border border-red-200
@@ -41,7 +41,7 @@
         Copy
       </button>
       <form method="post" action="{% url 'group_invite_regenerate' group.pk %}"
-            onsubmit="return confirm('Regenerate the invite link? The old link will stop working.')">
+            data-confirm="Regenerate the invite link?" data-confirm-detail="The old link will stop working." data-confirm-ok="Regenerate">
         {% csrf_token %}
         <button type="submit"
                 class="text-sm font-semibold text-slate-500 hover:text-slate-700 border border-slate-200
