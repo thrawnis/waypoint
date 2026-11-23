@@ -78,33 +78,39 @@
         <thead>
           <tr class="text-left text-xs text-slate-500 uppercase tracking-wide border-b border-slate-100">
             <th class="px-4 py-3 font-semibold">Name</th>
-            <th class="px-4 py-3 font-semibold">Location</th>
-            <th class="px-4 py-3 font-semibold">Source</th>
-            <th class="px-4 py-3 font-semibold">Added by</th>
+            <th class="hidden md:table-cell px-4 py-3 font-semibold">Location</th>
+            <th class="hidden md:table-cell px-4 py-3 font-semibold">Source</th>
+            <th class="hidden md:table-cell px-4 py-3 font-semibold">Added by</th>
             <th class="px-4 py-3 font-semibold text-right">Actions</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
           {% for loc in locations %}
           <tr class="hover:bg-slate-50">
-            <td class="px-4 py-3 font-medium text-slate-800">{{ loc.name }}</td>
-            <td class="px-4 py-3 text-slate-500">
+            <td class="px-4 py-3 font-medium text-slate-800">
+              {{ loc.name }}
+              {# On phones the other columns are hidden; keep the essentials here. #}
+              <span class="md:hidden block text-xs font-normal text-slate-500 mt-0.5">
+                {{ loc.city }}{% if loc.city and loc.state %}, {% endif %}{{ loc.state }}{% if loc.google_place_id %} · Google POI{% endif %}
+              </span>
+            </td>
+            <td class="hidden md:table-cell px-4 py-3 text-slate-500">
               {{ loc.city }}{% if loc.city and loc.state %}, {% endif %}{{ loc.state }}
             </td>
-            <td class="px-4 py-3">
+            <td class="hidden md:table-cell px-4 py-3">
               {% if loc.google_place_id %}
               <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Google POI</span>
               {% else %}
               <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">Manual</span>
               {% endif %}
             </td>
-            <td class="px-4 py-3 text-slate-500">{{ loc.created_by.username|default:"—" }}</td>
+            <td class="hidden md:table-cell px-4 py-3 text-slate-500">{{ loc.created_by.username|default:"—" }}</td>
             <td class="px-4 py-3">
-              <div class="flex items-center justify-end gap-3 whitespace-nowrap">
-                <a href="{% url 'location_detail' loc.pk %}" class="text-slate-500 hover:text-brand">View</a>
-                <a href="{% url 'location_edit' loc.pk %}" class="text-brand hover:underline font-medium">Edit</a>
+              <div class="flex items-center justify-end gap-1 whitespace-nowrap">
+                <a href="{% url 'location_detail' loc.pk %}" class="px-2 py-2 -my-2 text-slate-500 hover:text-brand">View</a>
+                <a href="{% url 'location_edit' loc.pk %}" class="px-2 py-2 -my-2 text-brand hover:underline font-medium">Edit</a>
                 <a href="{% url 'location_delete' loc.pk %}?next={{ request.get_full_path|urlencode }}"
-                   class="text-red-500 hover:text-red-700">Delete</a>
+                   class="px-2 py-2 -my-2 text-red-500 hover:text-red-700">Delete</a>
               </div>
             </td>
           </tr>

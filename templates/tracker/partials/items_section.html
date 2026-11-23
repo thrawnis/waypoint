@@ -10,7 +10,7 @@
     <button hx-get="{% url 'item_add' location.pk %}"
             hx-target="#items-section"
             hx-swap="outerHTML"
-            class="text-xs font-medium text-brand hover:text-brand-dark flex items-center gap-1 transition-colors">
+            class="text-xs font-medium text-brand hover:text-brand-dark flex items-center gap-1 transition-colors px-2 py-1.5 -my-1.5 -mr-2">
       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
       </svg>
@@ -68,7 +68,7 @@
         <div class="flex items-center gap-1 shrink-0" @click.stop>
           <button hx-get="{% url 'item_edit' location.pk item.pk %}"
                   hx-target="#items-section" hx-swap="outerHTML"
-                  class="text-slate-400 hover:text-brand transition-colors p-0.5" title="Edit item">
+                  class="text-slate-400 hover:text-brand transition-colors p-2 -m-1.5" title="Edit item">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
@@ -77,7 +77,7 @@
           <button hx-post="{% url 'item_delete' location.pk item.pk %}"
                   hx-target="#items-section" hx-swap="outerHTML"
                   data-reason-prompt="Delete '{{ item.name }}' and all its reviews?"
-                  class="text-slate-400 hover:text-red-500 transition-colors p-0.5" title="Delete item">
+                  class="text-slate-400 hover:text-red-500 transition-colors p-2 -m-1.5" title="Delete item">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
@@ -176,7 +176,7 @@
             {% if review.user_id in linked_ids and behalf_edit.pk != review.pk %}
             <button hx-get="{% url 'item_review_on_behalf' location.pk item.pk %}?subject={{ review.user_id }}"
                     hx-target="#items-section" hx-swap="outerHTML"
-                    class="shrink-0 text-violet-400 hover:text-violet-700 transition-colors p-0.5"
+                    class="shrink-0 text-violet-400 hover:text-violet-700 transition-colors p-2 -m-1.5"
                     title="Edit {{ review.user.username }}'s review on their behalf">
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -189,7 +189,7 @@
             <div class="flex items-center gap-1 shrink-0">
               <button hx-get="{% url 'item_review_upsert' location.pk item.pk %}"
                       hx-target="#items-section" hx-swap="outerHTML"
-                      class="text-slate-400 hover:text-brand transition-colors p-0.5" title="Edit your review">
+                      class="text-slate-400 hover:text-brand transition-colors p-2 -m-1.5" title="Edit your review">
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                         d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
@@ -198,7 +198,7 @@
               <button hx-post="{% url 'item_review_delete' location.pk item.pk %}"
                       hx-target="#items-section" hx-swap="outerHTML"
                       data-reason-prompt="Delete your review for '{{ item.name }}'?"
-                      class="text-slate-400 hover:text-red-500 transition-colors p-0.5" title="Delete your review">
+                      class="text-slate-400 hover:text-red-500 transition-colors p-2 -m-1.5" title="Delete your review">
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                         d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>

@@ -133,7 +133,10 @@
     /* A little breathing room so content doesn't touch the screen edges —
        #outer-layout.map-mode below is position:fixed with its own left:0/
        right:0, so it's unaffected by this and still goes fully edge to edge. */
-    main { padding: 0 3px !important; max-width: none !important; }
+    main { padding: 0 !important; max-width: none !important; }
+    /* The search bar runs edge to edge; the chips and lists below it get the
+       same 12px side gutter as the rest of the app instead of ~3px. */
+    #quick-search-chips, #list-view { padding-left: 12px; padding-right: 12px; }
     /* Only pin #outer-layout to a fixed, non-scrolling app-shell box while
        the map view is active (the map + draggable bottom sheet need to fill
        the exact remaining viewport). In list view (the default) it stays in
@@ -158,6 +161,11 @@
     }
     #search-bar > * { flex: 1 1 140px; }
     #search-bar .shrink-0 { flex: 0 0 auto; }
+    /* Phones: the nearby search gets its own full-width row (so its hint
+       isn't cut to "Search nearby:"), and the city box shares the second row
+       with the locate/filter buttons instead of the filter button wrapping
+       onto a line of its own. */
+    #search-bar > :first-child { flex-basis: 100%; }
     #content-area {
       flex: 1 1 auto; min-height: 0;
       position: relative; display: block !important;
@@ -422,11 +430,11 @@
     <div id="saved-list-section" class="hidden">
       <!-- Sort / paging controls -->
       <div class="flex flex-wrap items-center gap-2 mb-3">
-        <span id="wp-list-count" class="text-sm font-semibold text-slate-600 mr-auto">Loading…</span>
+        <span id="wp-list-count" class="w-full sm:w-auto sm:mr-auto text-sm font-semibold text-slate-600">Loading…</span>
 
         <label class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Sort</label>
         <select id="wp-sort"
-                class="text-sm border border-slate-200 rounded-lg pl-3 pr-8 py-1.5 bg-white
+                class="flex-1 sm:flex-none text-sm border border-slate-200 rounded-lg pl-3 pr-8 py-1.5 bg-white
                        focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand">
           <option value="name">Name</option>
           <option value="rating">Waypoint rating</option>
@@ -445,7 +453,7 @@
         </button>
       </div>
 
-      <div id="wp-list" class="space-y-2"></div>
+      <div id="wp-list" class="grid gap-2 lg:grid-cols-2"></div>
 
       <!-- Pagination -->
       <div id="wp-pagination" class="hidden items-center justify-center gap-2 mt-5">

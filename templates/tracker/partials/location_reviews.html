@@ -136,7 +136,7 @@
           <button type="button"
                   hx-get="{% url 'location_review_on_behalf' location.pk %}?subject={{ review.user_id }}"
                   hx-target="#location-reviews" hx-swap="outerHTML"
-                  class="ml-auto text-[10px] font-semibold text-violet-600 hover:text-violet-800"
+                  class="ml-auto text-[11px] font-semibold text-violet-600 hover:text-violet-800 px-2 py-1.5 -my-1.5 -mr-2"
                   title="Edit {{ review.user.username }}'s review on their behalf">edit</button>
           {% endif %}
           {% if review.user == user %}
@@ -144,7 +144,7 @@
                 hx-target="#location-reviews" hx-swap="outerHTML"
                 data-reason-prompt="Delete your review?" class="ml-auto">
             {% csrf_token %}
-            <button type="submit" class="text-[10px] text-red-400 hover:text-red-600">delete</button>
+            <button type="submit" class="text-[11px] text-red-400 hover:text-red-600 px-2 py-1.5 -my-1.5 -mr-2">delete</button>
           </form>
           {% endif %}
         </div>
