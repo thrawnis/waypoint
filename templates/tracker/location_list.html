@@ -309,8 +309,10 @@
       <div x-show="open" x-cloak @click.outside="open = false" x-transition
            class="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-slate-100
                   p-3 z-[1100] space-y-3">
+        <!-- Every section: uppercase heading, control, optional helper text;
+             sections separated by a divider. Keep new filters to this shape. -->
         <div>
-          <label class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Waypoint rating</label>
+          <label for="rating-filter" class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Waypoint rating</label>
           <select id="rating-filter" title="Minimum Waypoint rating"
                   class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white
                          focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand">
@@ -321,8 +323,8 @@
             <option value="4.5">★ 4.5 &amp; up</option>
           </select>
         </div>
-        <div>
-          <label class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Google rating</label>
+        <div class="pt-3 border-t border-slate-100">
+          <label for="google-rating-filter" class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Google rating</label>
           <select id="google-rating-filter" title="Minimum Google rating"
                   class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white
                          focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand">
@@ -332,22 +334,23 @@
             <option value="4">🅖 4.0 &amp; up</option>
             <option value="4.5">🅖 4.5 &amp; up</option>
           </select>
-          <p class="text-[11px] text-slate-400 mt-1">Only applies to places with a known Google rating (seen via Nearby search or the map).</p>
+          <span class="block text-[11px] leading-snug text-slate-400 mt-1">Only applies to places with a known Google rating (seen via Nearby search or the map).</span>
         </div>
-        <label class="flex items-center gap-2 cursor-pointer select-none pt-1 border-t border-slate-100">
-          <input type="checkbox" id="mine-filter"
-                 class="w-4 h-4 rounded border-slate-300 text-brand focus:ring-brand/30">
-          <span class="text-sm text-slate-700">Only places I've rated or noted</span>
-        </label>
-        <label class="flex items-start gap-2 cursor-pointer select-none">
-          <input type="checkbox" id="active-filter"
-                 class="w-4 h-4 mt-0.5 rounded border-slate-300 text-brand focus:ring-brand/30">
-          <span class="text-sm text-slate-700">Has Waypoint activity
-            <span class="block text-[11px] text-slate-400">A review or rating from anyone, a dish, a photo, GF info, or notes</span>
-          </span>
-        </label>
-        <div class="pt-1 border-t border-slate-100">
-          <label class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Gluten-free</label>
+        <div class="pt-3 border-t border-slate-100 space-y-2.5">
+          <span class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5 !mb-0">Show only</span>
+          <label class="flex items-start gap-2 cursor-pointer select-none">
+            <input type="checkbox" id="mine-filter" class="w-4 h-4 mt-0.5 shrink-0 rounded border-slate-300 text-brand focus:ring-brand/30">
+            <span class="text-sm leading-5 text-slate-700">Places I've rated or noted</span>
+          </label>
+          <label class="flex items-start gap-2 cursor-pointer select-none">
+            <input type="checkbox" id="active-filter" class="w-4 h-4 mt-0.5 shrink-0 rounded border-slate-300 text-brand focus:ring-brand/30">
+            <span class="text-sm leading-5 text-slate-700">Has Waypoint activity
+              <span class="block text-[11px] leading-snug text-slate-400 mt-1">A review or rating from anyone, a dish, a photo, GF info, or notes</span>
+            </span>
+          </label>
+        </div>
+        <div class="pt-3 border-t border-slate-100">
+          <label for="gf-filter" class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Gluten-free</label>
           <select id="gf-filter" title="Gluten-free level"
                   class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white
                          focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand">
@@ -357,8 +360,8 @@
           </select>
         </div>
         <button id="clear-filters" type="button"
-                class="w-full text-xs font-semibold text-slate-500 hover:text-brand
-                       border border-slate-200 rounded-lg py-1.5 transition-colors">
+                class="w-full text-sm font-semibold text-slate-500 hover:text-brand
+                       border border-slate-200 rounded-lg py-2 transition-colors">
           Clear all filters
         </button>
       </div>
