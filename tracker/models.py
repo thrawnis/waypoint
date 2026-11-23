@@ -97,6 +97,12 @@ class Location(models.Model):
         return self.overall_rating
 
     @property
+    def rated_review_count(self):
+        """Reviews that carry stars (written-only reviews don't count toward
+        the average). Uses the prefetched reviews when available."""
+        return sum(1 for r in self.reviews.all() if r.rating is not None)
+
+    @property
     def review_count(self):
         return self.reviews.count()
 
@@ -152,9 +158,13 @@ class LocationReview(models.Model):
 
     location = models.ForeignKey(Location, on_delete=models.CASCADE, related_name="reviews")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="location_reviews")
+    # Optional: a written review may deliberately have no stars (the form
+    # makes the user confirm that). Averages simply skip unrated reviews.
     rating = models.DecimalField(
         max_digits=2,
         decimal_places=1,
+        null=True,
+        blank=True,
         validators=RATING_VALIDATORS,
     )
     notes = models.TextField(blank=True, help_text="Your review of this place")
@@ -235,9 +245,13 @@ class ItemReview(models.Model):
 
     item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name="reviews")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="item_reviews")
+    # Optional: a written review may deliberately have no stars (the form
+    # makes the user confirm that). Averages simply skip unrated reviews.
     rating = models.DecimalField(
         max_digits=2,
         decimal_places=1,
+        null=True,
+        blank=True,
         validators=RATING_VALIDATORS,
     )
     notes = models.TextField(blank=True, help_text="Your personal review or tasting notes")

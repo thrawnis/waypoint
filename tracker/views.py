@@ -73,6 +73,17 @@ def _log(request, action, obj, detail=""):
     )
 
 
+def _rating_text(rating):
+    return "{}/5".format(rating) if rating is not None else "written review, no star rating"
+
+
+def _first_form_error(form):
+    for errors in form.errors.values():
+        if errors:
+            return errors[0]
+    return "Please check the review."
+
+
 def _require_reason(request):
     """Deletes must include a non-empty 'reason', recorded in the audit log
     (the UI always supplies one via a prompt/textarea). Returns the trimmed
@@ -988,7 +999,7 @@ def _bulk_group_rating_breakdown(user, location_ids):
     for loc_id, revs in by_location.items():
         breakdown = []
         for group, member_ids in my_groups:
-            ratings = [r["rating"] for r in revs if r["user_id"] in member_ids]
+            ratings = [r["rating"] for r in revs if r["user_id"] in member_ids and r["rating"] is not None]
             if ratings:
                 breakdown.append({
                     "group": group,
@@ -1597,26 +1608,34 @@ def item_add(request, pk):
             initial_rating = request.POST.get("initial_rating", "").strip()
             initial_notes  = request.POST.get("initial_notes", "").strip()
             initial_private_notes = request.POST.get("initial_private_notes", "").strip()
-            if initial_rating and not location.reviews.filter(user=request.user).exists():
+            wants_review = bool(initial_rating or initial_notes)
+            if wants_review and not location.reviews.filter(user=request.user).exists():
                 messages.error(
                     request,
-                    'Item added. Rate "{}" overall before your dish rating can be saved.'.format(location.name),
+                    'Item added. Rate "{}" overall before your dish review can be saved.'.format(location.name),
                 )
-                initial_rating = ""
-            if initial_rating:
+                wants_review = False
+            val = None
+            if wants_review and initial_rating:
+                from decimal import Decimal, InvalidOperation
                 try:
-                    from decimal import Decimal
                     val = Decimal(initial_rating)
-                    if Decimal("0.5") <= val <= 5:
-                        rev, _created = ItemReview.objects.update_or_create(
-                            item=item, user=request.user,
-                            defaults={"rating": val, "notes": initial_notes,
-                                      "private_notes": initial_private_notes},
-                        )
-                        _log(request, AuditLog.ACTION_CREATE, rev,
-                             'Rated "{}" {}/5 in "{}"'.format(item.name, val, location.name))
-                except Exception:
-                    pass
+                except InvalidOperation:
+                    val = None
+                if val is not None and not (Decimal("0.5") <= val <= 5):
+                    val = None
+            if wants_review and val is None and initial_notes and request.POST.get("no_rating_ok") != "1":
+                messages.error(request, "Item added. Your review wasn't saved: choose a star rating, "
+                                        "or confirm saving it without one.")
+                wants_review = False
+            if wants_review and (val is not None or initial_notes):
+                rev, _created = ItemReview.objects.update_or_create(
+                    item=item, user=request.user,
+                    defaults={"rating": val, "notes": initial_notes,
+                              "private_notes": initial_private_notes},
+                )
+                _log(request, AuditLog.ACTION_CREATE, rev,
+                     'Reviewed "{}" in "{}": {}'.format(item.name, location.name, _rating_text(val)))
             return _render_items_section(request, location)
         return _render_items_section(request, location, item_form=form, show_form=True)
     show = request.GET.get("show", "1") != "0"
@@ -1678,9 +1697,9 @@ def item_review_upsert(request, pk, item_pk):
             review.save()
             action = AuditLog.ACTION_UPDATE if existing else AuditLog.ACTION_CREATE
             _log(request, action, review,
-                 '{} review for "{}" in "{}": {}/5'.format(
+                 '{} review for "{}" in "{}": {}'.format(
                      "Updated" if existing else "Added",
-                     item.name, location.name, review.rating))
+                     item.name, location.name, _rating_text(review.rating)))
             return _render_items_section(request, location)
         return _render_items_section(
             request, location,
@@ -1734,11 +1753,12 @@ def item_review_on_behalf(request, pk, item_pk):
     form = ItemReviewForm({
         "rating": request.POST.get("rating"),
         "notes": request.POST.get("notes", ""),
+        "no_rating_ok": request.POST.get("no_rating_ok", ""),
         # Keep whatever they wrote privately; it isn't part of this form.
         "private_notes": existing.private_notes if existing else "",
     }, instance=existing)
     if not form.is_valid():
-        messages.error(request, "Please choose a rating for {}.".format(subject.username))
+        messages.error(request, "{}: {}".format(subject.username, _first_form_error(form)))
         return _render_items_section(request, location, behalf_edit=existing)
     review = form.save(commit=False)
     review.item = item
@@ -1747,8 +1767,9 @@ def item_review_on_behalf(request, pk, item_pk):
     review.subject_seen = False
     review.save()
     _log(request, AuditLog.ACTION_UPDATE if existing else AuditLog.ACTION_CREATE, review,
-         '{} review for "{}" in "{}" on behalf of {}: {}/5'.format(
-             "Updated" if existing else "Added", item.name, location.name, subject.username, review.rating))
+         '{} review for "{}" in "{}" on behalf of {}: {}'.format(
+             "Updated" if existing else "Added", item.name, location.name, subject.username,
+             _rating_text(review.rating)))
     messages.success(request, "Dish review {} for {}.".format("updated" if existing else "added", subject.username))
     return _render_items_section(request, location)
 
@@ -2059,8 +2080,8 @@ def location_review_upsert(request, pk):
             review.save()
             action = AuditLog.ACTION_UPDATE if existing else AuditLog.ACTION_CREATE
             _log(request, action, review,
-                 '{} review for "{}": {}/5'.format(
-                     "Updated" if existing else "Added", location.name, review.rating))
+                 '{} review for "{}": {}'.format(
+                     "Updated" if existing else "Added", location.name, _rating_text(review.rating)))
             return _render_location_reviews(request, location)
         return _render_location_reviews(request, location, review_form=form, show_form=True)
 
@@ -2116,7 +2137,7 @@ def location_review_on_behalf(request, pk):
 
     form = LocationReviewForm(request.POST, instance=existing)
     if not form.is_valid():
-        messages.error(request, "Please choose a rating for {}.".format(subject.username))
+        messages.error(request, "{}: {}".format(subject.username, _first_form_error(form)))
         return _render_location_reviews(request, location, behalf_edit=existing)
     review = form.save(commit=False)
     review.location = location
@@ -2125,8 +2146,8 @@ def location_review_on_behalf(request, pk):
     review.subject_seen = False       # surfaced to the subject on their next login
     review.save()
     _log(request, AuditLog.ACTION_UPDATE if existing else AuditLog.ACTION_CREATE, review,
-         '{} review for "{}" on behalf of {}: {}/5'.format(
-             "Updated" if existing else "Added", location.name, subject.username, review.rating))
+         '{} review for "{}" on behalf of {}: {}'.format(
+             "Updated" if existing else "Added", location.name, subject.username, _rating_text(review.rating)))
     messages.success(request, "Review {} for {}.".format("updated" if existing else "added", subject.username))
     return _render_location_reviews(request, location)
 

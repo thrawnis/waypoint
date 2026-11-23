@@ -210,6 +210,20 @@ class ItemForm(forms.ModelForm):
         return to_title_case(self.cleaned_data.get("name", ""))
 
 
+def _clean_optional_rating(form, cleaned):
+    """A review needs stars, written text, or both. Text without stars is
+    allowed only when the submission confirms it's deliberate (the browser
+    asks first and then sends no_rating_ok=1)."""
+    if cleaned.get("rating"):
+        return cleaned
+    cleaned["rating"] = None
+    if not (cleaned.get("notes") or "").strip():
+        form.add_error("rating", "Choose a star rating or write a review.")
+    elif form.data.get("no_rating_ok") != "1":
+        form.add_error("rating", "Choose a star rating, or confirm you want to save the review without one.")
+    return cleaned
+
+
 class ItemReviewForm(forms.ModelForm):
     """A single user's rating + review text for one item."""
 
@@ -226,11 +240,8 @@ class ItemReviewForm(forms.ModelForm):
             ),
         }
 
-    def clean_rating(self):
-        rating = self.cleaned_data.get("rating")
-        if not rating:
-            raise forms.ValidationError("Please select a star rating.")
-        return rating
+    def clean(self):
+        return _clean_optional_rating(self, super().clean())
 
 
 class LocationReviewForm(forms.ModelForm):
@@ -246,11 +257,8 @@ class LocationReviewForm(forms.ModelForm):
             ),
         }
 
-    def clean_rating(self):
-        rating = self.cleaned_data.get("rating")
-        if not rating:
-            raise forms.ValidationError("Please select a star rating.")
-        return rating
+    def clean(self):
+        return _clean_optional_rating(self, super().clean())
 
 
 class CollectionForm(forms.ModelForm):

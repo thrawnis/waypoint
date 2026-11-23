@@ -333,6 +333,32 @@
     // HTMX-triggered deletes: put the confirmation message in
     // data-reason-prompt instead of hx-confirm. htmx's own confirm dialog is
     // replaced by our prompt(), and the answer is sent along as "reason".
+    // Review forms (data-rating-optional): saving written text with no stars
+    // is allowed, but only after the user confirms it's deliberate. The
+    // server refuses an unrated review unless no_rating_ok=1 comes with it.
+    document.body.addEventListener('htmx:confirm', (e) => {
+      const form = e.detail.elt;
+      if (!form.matches || !form.matches('form[data-rating-optional]')) return;
+      const ratingName = form.dataset.ratingField || 'rating';
+      const notesName = form.dataset.notesField || 'notes';
+      const rating = form.querySelector(`[name="${ratingName}"]`);
+      const notes = form.querySelector(`[name="${notesName}"]`);
+      let flag = form.querySelector('input[name="no_rating_ok"]');
+      if (flag) flag.value = '';
+      const unrated = !rating || !rating.value || rating.value === '0';
+      const hasText = !!(notes && notes.value.trim());
+      if (!unrated || !hasText) return;   // nothing to confirm
+      e.preventDefault();
+      if (!window.confirm('Save this review without a star rating?\n\nThe written review will be saved, but it won\'t count toward the average rating.')) return;
+      if (!flag) {
+        flag = document.createElement('input');
+        flag.type = 'hidden';
+        flag.name = 'no_rating_ok';
+        form.appendChild(flag);
+      }
+      flag.value = '1';
+      e.detail.issueRequest(true);
+    });
     document.body.addEventListener('htmx:confirm', (e) => {
       const el = e.detail.elt;
       const msg = el.getAttribute('data-reason-prompt');

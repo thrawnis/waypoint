@@ -40,7 +40,7 @@
   <div class="flex items-center gap-2 mb-3">
     {% stars_display avg "md" %}
     <span class="text-sm text-slate-500">
-      average{% with rc=location.reviews.all|length %}{% if rc %} of {{ rc }} review{{ rc|pluralize }}{% endif %}{% endwith %}
+      average{% with rc=location.rated_review_count %}{% if rc %} of {{ rc }} rating{{ rc|pluralize }}{% endif %}{% endwith %}
     </span>
   </div>
   {% endif %}
@@ -48,7 +48,7 @@
 
   <!-- Review form -->
   {% if show_form and user.is_authenticated %}
-  <form hx-post="{% url 'location_review_upsert' location.pk %}"
+  <form data-rating-optional hx-post="{% url 'location_review_upsert' location.pk %}"
         hx-target="#location-reviews" hx-swap="outerHTML"
         class="mb-4 p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
     {% csrf_token %}
@@ -81,7 +81,7 @@
                    hover:border-violet-400 px-2.5 py-1 rounded-lg transition-all">
       ＋ Add a review for a linked account
     </button>
-    <form x-show="open" x-cloak
+    <form x-show="open" x-cloak data-rating-optional
           hx-post="{% url 'location_review_on_behalf' location.pk %}"
           hx-target="#location-reviews" hx-swap="outerHTML"
           class="p-3 bg-violet-50/50 border border-violet-200 rounded-xl space-y-2">
@@ -123,9 +123,13 @@
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2 flex-wrap">
           <span class="text-sm font-semibold text-slate-800">{{ review.user.username }}</span>
+          {% if review.rating is not None %}
           <span class="text-xs font-semibold text-amber-600">
             <span class="text-yellow-400">★</span> {{ review.rating|floatformat:1 }}
           </span>
+          {% else %}
+          <span class="text-[10px] font-medium text-slate-400">No star rating</span>
+          {% endif %}
           <span class="text-[10px] text-slate-400">{{ review.updated_at|date:"M Y" }}</span>
           {% include "tracker/partials/onbehalf_callout.html" with review=review %}
           {% if review.user_id in linked_ids and behalf_edit.pk != review.pk %}
@@ -145,7 +149,7 @@
           {% endif %}
         </div>
         {% if behalf_edit.pk == review.pk %}
-        <form hx-post="{% url 'location_review_on_behalf' location.pk %}"
+        <form data-rating-optional hx-post="{% url 'location_review_on_behalf' location.pk %}"
               hx-target="#location-reviews" hx-swap="outerHTML"
               class="mt-2 p-3 bg-violet-50/50 border border-violet-200 rounded-xl space-y-2">
           {% csrf_token %}

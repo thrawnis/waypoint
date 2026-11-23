@@ -134,12 +134,12 @@
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="text-xs font-semibold text-slate-700">{{ review.user.username }}</span>
-                {% stars_display review.rating "sm" %}
+                {% if review.rating is not None %}{% stars_display review.rating "sm" %}{% else %}<span class="text-[10px] font-medium text-slate-400">No star rating</span>{% endif %}
                 {% include "tracker/partials/onbehalf_callout.html" with review=review %}
                 <span class="text-[10px] text-slate-400 ml-auto">{{ review.updated_at|date:"M Y" }}</span>
               </div>
               {% if behalf_edit.pk == review.pk %}
-              <form hx-post="{% url 'item_review_on_behalf' location.pk item.pk %}"
+              <form data-rating-optional hx-post="{% url 'item_review_on_behalf' location.pk item.pk %}"
                     hx-target="#items-section" hx-swap="outerHTML" @click.stop
                     class="mt-2 p-2.5 bg-violet-50/50 border border-violet-200 rounded-lg space-y-2">
                 {% csrf_token %}
@@ -222,7 +222,7 @@
 
         <!-- Review form (inline, when this item is active) -->
         {% if review_item_pk == item.pk %}
-        <form hx-post="{% url 'item_review_upsert' location.pk item.pk %}"
+        <form data-rating-optional hx-post="{% url 'item_review_upsert' location.pk item.pk %}"
               hx-target="#items-section" hx-swap="outerHTML"
               class="border-t border-brand/20 bg-indigo-50/40 px-3 py-3 space-y-2">
           <p class="text-xs font-semibold text-brand">
@@ -271,7 +271,7 @@
         <!-- "Rate this" / "Edit review" button -->
         <div class="border-t border-slate-100 px-3 py-1.5 flex items-center justify-between">
           {% if my_review %}
-          <span class="text-[11px] text-slate-400">Your rating: <strong class="text-yellow-600">{{ my_review.rating }}</strong></span>
+          <span class="text-[11px] text-slate-400">{% if my_review.rating is not None %}Your rating: <strong class="text-yellow-600">{{ my_review.rating }}</strong>{% else %}You reviewed this (no star rating){% endif %}</span>
           <button hx-get="{% url 'item_review_upsert' location.pk item.pk %}"
                   hx-target="#items-section" hx-swap="outerHTML"
                   class="text-[11px] font-medium text-brand hover:text-brand-dark transition-colors">
@@ -306,7 +306,7 @@
                   class="text-[11px] font-semibold text-violet-700 hover:text-violet-900">
             ＋ Add for a linked account
           </button>
-          <form x-show="open" x-cloak
+          <form x-show="open" x-cloak data-rating-optional
                 hx-post="{% url 'item_review_on_behalf' location.pk item.pk %}"
                 hx-target="#items-section" hx-swap="outerHTML" class="space-y-2 pt-1">
             {% csrf_token %}
@@ -346,7 +346,8 @@
 
   <!-- Add item form -->
   {% if show_form %}
-  <form hx-post="{% url 'item_add' location.pk %}"
+  <form data-rating-optional data-rating-field="initial_rating" data-notes-field="initial_notes"
+        hx-post="{% url 'item_add' location.pk %}"
         hx-target="#items-section"
         hx-swap="outerHTML"
         class="mt-4 bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-sm">
@@ -383,7 +384,7 @@
       <textarea name="initial_private_notes" rows="2" placeholder="A note only you will see…"
                 class="block w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 outline-none
                        focus:border-brand focus:ring-2 focus:ring-brand/20 resize-none"></textarea>
-      <p class="text-[10px] text-slate-400 mt-1">Requires a rating above to be saved.</p>
+      <p class="text-[10px] text-slate-400 mt-1">Saved along with your rating or review above.</p>
     </div>
     {% else %}
     <p class="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
