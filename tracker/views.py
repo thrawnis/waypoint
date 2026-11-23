@@ -1014,6 +1014,23 @@ def _group_rating_summary_text(breakdown):
 
 # ── Locations ─────────────────────────────────────────────────────────────────
 
+def _has_activity(loc, user):
+    """Whether anyone has recorded anything about this waypoint beyond saving
+    it: a review or rating, a dish, a photo, GF status, or notes. Private notes
+    only count for the waypoint's creator, the only one who can see them.
+    Expects loc annotated with user_review_count and photos/items prefetched."""
+    return bool(
+        loc.user_review_count
+        or loc.overall_rating is not None
+        or loc.photos.all()
+        or loc.items.all()
+        or loc.gluten_free
+        or loc.public_notes.strip()
+        or loc.dietary_notes.strip()
+        or (loc.private_notes.strip() and loc.created_by_id == user.pk)
+    )
+
+
 @login_required
 @ratelimit("home", 60, 60)
 def location_list(request):
@@ -1039,11 +1056,13 @@ def location_list(request):
     for loc in loc_list:
         rating = loc.user_avg_rating if loc.user_avg_rating is not None else loc.overall_rating
         first_photo = next(iter(loc.photos.all()), None)
+        loc.has_activity = _has_activity(loc, request.user)
         waypoints.append({
             "id": loc.pk,
             "name": loc.name,
             "gluten_free": loc.gluten_free,
             "mine": bool(loc.mine),
+            "active": loc.has_activity,
             "rating": round(float(rating), 1) if rating else None,
             "review_count": loc.user_review_count,
             "google_place_id": loc.google_place_id or "",
