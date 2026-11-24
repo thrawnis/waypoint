@@ -37,6 +37,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "tracker.middleware.SessionRefreshMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "tracker.middleware.HtmxRedirectMiddleware",
@@ -176,6 +177,13 @@ CLIENT_IP_HEADER = os.environ.get("CLIENT_IP_HEADER", "HTTP_CF_CONNECTING_IP")
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+
+# ── Sessions ───────────────────────────────────────────────────────────────────
+# Each device signs in with its own session, so any number of devices can
+# stay signed in at once; signing out only ends that device's session. A
+# session lasts this long after the device was last used (renewed by
+# SessionRefreshMiddleware), not after it first signed in.
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 14   # 2 weeks of inactivity
 
 # ── Cookie hardening ───────────────────────────────────────────────────────────
 SESSION_COOKIE_HTTPONLY = True   # prevent JS from reading the session cookie

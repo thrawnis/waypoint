@@ -1,3 +1,5 @@
+import time
+
 from django.conf import settings
 from django.http import HttpResponse
 from django.shortcuts import redirect
@@ -25,6 +27,32 @@ class HtmxRedirectMiddleware:
             hx["HX-Redirect"] = response["Location"]
             return hx
         return response
+
+
+class SessionRefreshMiddleware:
+    """Keeps signed-in devices signed in while they're being used. Django only
+    pushes a session's expiry forward when the session is saved, which most
+    requests never do — so even a phone used daily was signed out two weeks
+    after its last save. Re-save once less than half the lifetime remains:
+    active devices stay in, idle ones still expire, and it costs one write
+    per device per week rather than one per request."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    KEY = "_refreshed_at"
+
+    def __call__(self, request):
+        user = getattr(request, "user", None)
+        if user is not None and user.is_authenticated:
+            now = int(time.time())
+            # The DB expiry date isn't readable from the session itself, so
+            # track when this session was last pushed forward. Changing the
+            # key marks the session modified, which re-saves it with a fresh
+            # expiry and re-sends the cookie.
+            if now - request.session.get(self.KEY, 0) > settings.SESSION_COOKIE_AGE // 2:
+                request.session[self.KEY] = now
+        return self.get_response(request)
 
 
 # URL names that every gate must leave reachable, so one gate never blocks
