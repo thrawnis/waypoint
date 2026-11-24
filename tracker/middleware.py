@@ -32,10 +32,11 @@ class HtmxRedirectMiddleware:
 class SessionRefreshMiddleware:
     """Keeps signed-in devices signed in while they're being used. Django only
     pushes a session's expiry forward when the session is saved, which most
-    requests never do — so even a phone used daily was signed out two weeks
-    after its last save. Re-save once less than half the lifetime remains:
-    active devices stay in, idle ones still expire, and it costs one write
-    per device per week rather than one per request."""
+    requests never do — so even a device used daily was signed out once
+    SESSION_COOKIE_AGE had passed since its last save. Re-save once less than
+    half the lifetime remains: active devices stay in, idle ones still
+    expire, and it costs one write per device per half-lifetime rather than
+    one per request."""
 
     def __init__(self, get_response):
         self.get_response = get_response

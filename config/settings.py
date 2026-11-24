@@ -183,7 +183,7 @@ SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 # stay signed in at once; signing out only ends that device's session. A
 # session lasts this long after the device was last used (renewed by
 # SessionRefreshMiddleware), not after it first signed in.
-SESSION_COOKIE_AGE = 60 * 60 * 24 * 14   # 2 weeks of inactivity
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 90   # 90 days of inactivity
 
 # ── Cookie hardening ───────────────────────────────────────────────────────────
 SESSION_COOKIE_HTTPONLY = True   # prevent JS from reading the session cookie
